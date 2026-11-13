@@ -4,38 +4,45 @@ import * as api from '../api';
 import { useData, useToast } from '../context/AppContext';
 import { Field, Modal, PageHeader, Segmented, TypeChip } from '../components/ui';
 import Icon from '../components/Icon';
-import { DOCUMENT_NAMES, PRODUCTS, TAT_TYPES, TYPE_LIST, typeOf } from '../config/verification';
-import { coordsFromLink, directionsLink, mapLinkFromCoords } from '../utils/maps';
-import { copyText, feedbackUrl, fmtDateTime } from '../utils/format';
+import { DOCUMENT_NAMES, PINCODE_RE, TAT_TYPES, TYPE_LIST, typeOf } from '../config/verification';
+import { coordsFromLink, directionsLink } from '../utils/maps';
+import { copyText, feedbackUrl, fmtDateTime, inr } from '../utils/format';
 import { caseStatus } from '../utils/tat';
+import { rankByPincode, suggestExecutive } from '../utils/pincode';
+import CaseInfoFields, { EMPTY_INFO, infoPayload, productOf, validateInfo } from '../components/CaseInfoFields';
 
-const MIN_DOCS = 6;
 let tmpId = 0;
 const newLeg = (type) => ({
   key: ++tmpId,
   type,
   address: '',
+  pincode: '',
   mapLink: '',
-  lat: '',
-  lng: '',
   fromPlace: '',
   toPlace: '',
   km: '',
   contact: '',
   trigger: '',
   executiveId: '',
+  execPicked: false, // true once the user chooses an executive by hand (stop auto-suggesting)
   documentName: '',
   documentOther: '',
+  docNo: '', // internal document check
+  docDetails: '',
+  docStatus: '',
   attachments: [],
   contactPerson: '',
 });
+
+const EMPTY_FORM = { ...EMPTY_INFO, bankId: '', tatType: 'LOCAL' };
+const digits = (v) => v.replace(/\D/g, '');
 
 export default function NewCase() {
   const { banks, executives, cases, refresh } = useData();
   const toast = useToast();
   const navigate = useNavigate();
   const [createdAt] = useState(() => new Date());
-  const [form, setForm] = useState({ bankId: '', customerName: '', product: '', contact: '', tatType: 'LOCAL' });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [legs, setLegs] = useState([newLeg('RESIDENCE')]);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -46,33 +53,35 @@ export default function NewCase() {
   const addLeg = (type) => setLegs((ls) => [...ls, newLeg(type)]);
   const removeLeg = (key) => setLegs((ls) => ls.filter((l) => l.key !== key));
 
-  // Open (not yet submitted) verifications per executive — helps pick someone free.
+  // Open (not yet submitted) verifications per executive — tie-breaker when several are equally near.
   const openLoad = useMemo(() => {
     const m = {};
     cases.filter((c) => caseStatus(c) !== 'CLOSED').forEach((c) => c.legs.forEach((l) => {
-      if (l.status !== 'SUBMITTED') m[l.executiveId] = (m[l.executiveId] || 0) + 1;
+      if (l.status !== 'SUBMITTED' && l.executiveId) m[l.executiveId] = (m[l.executiveId] || 0) + 1;
     }));
     return m;
   }, [cases]);
   const activeExecs = executives.filter((e) => e.status === 'Active');
   const activeBanks = banks.filter((b) => b.status === 'Active');
   const deadline = new Date(createdAt.getTime() + TAT_TYPES[form.tatType].hours * 3600e3);
+  const product = productOf(form);
 
   function validate() {
     const e = {};
     if (!form.bankId) e.bankId = 'Choose the client bank';
-    if (!form.customerName.trim()) e.customerName = 'Enter the customer name';
-    if (!form.product.trim()) e.product = 'Enter the product';
-    if (!/^\d{10}$/.test(form.contact.replace(/\D/g, ''))) e.contact = 'Enter a 10-digit mobile number';
+    Object.assign(e, validateInfo(form));
     legs.forEach((l) => {
       const t = typeOf(l.type);
-      if (!t.isDocument && !l.address.trim()) e[`${l.key}.address`] = 'Address is required';
-      if (!l.executiveId) e[`${l.key}.executiveId`] = 'Assign an executive';
+      const field = !t.isDocument && !t.internal;
+      if (!t.isDocument && !l.address.trim()) e[`${l.key}.address`] = t.internal ? 'Enter the bank / branch' : 'Address is required';
+      if (field && !PINCODE_RE.test(l.pincode)) e[`${l.key}.pincode`] = 'Enter the 6-digit PIN code';
+      if (t.isDocument && l.pincode && !PINCODE_RE.test(l.pincode)) e[`${l.key}.pincode`] = 'Enter the 6-digit PIN code';
+      if (!t.internal && !l.executiveId) e[`${l.key}.executiveId`] = 'Assign an executive';
       if (l.km !== '' && Number(l.km) < 0) e[`${l.key}.km`] = 'Distance cannot be negative';
+      if (l.mapLink && !/^https:\/\//i.test(l.mapLink)) e[`${l.key}.mapLink`] = 'Paste a full https:// Google Maps link';
       if (t.isDocument) {
         if (!l.documentName) e[`${l.key}.documentName`] = 'Choose the document';
         if (l.documentName === 'Other' && !l.documentOther.trim()) e[`${l.key}.documentName`] = 'Enter the document name';
-        if (l.attachments.length < MIN_DOCS) e[`${l.key}.attachments`] = `Attach at least ${MIN_DOCS} photos / PDFs (${l.attachments.length} added)`;
       }
     });
     setErrors(e);
@@ -90,16 +99,25 @@ export default function NewCase() {
     setBusy(true);
     try {
       const c = await api.cases.create({
-        ...form,
-        contact: form.contact.replace(/\D/g, ''),
-        legs: legs.map(({ key, documentOther, ...l }) => ({
-          ...l,
-          documentName: l.documentName === 'Other' ? documentOther.trim() : l.documentName,
-          contact: l.contact || form.contact.replace(/\D/g, ''),
-          mapLink: l.mapLink || mapLinkFromCoords(l.lat, l.lng),
-          km: l.km === '' ? null : Number(l.km),
-          attachments: l.attachments.map(({ file, name, type, size }) => ({ file, name, type, size })),
-        })),
+        ...infoPayload(form),
+        bankId: form.bankId,
+        tatType: form.tatType,
+        legs: legs.map(({ key, documentOther, execPicked, docNo, docDetails, docStatus, ...l }) => {
+          const internal = typeOf(l.type).internal;
+          return {
+            ...l,
+            ...(typeOf(l.type).isDocument && internal && {
+              findings: Object.fromEntries(
+                Object.entries({ documentNo: docNo.trim(), details: docDetails.trim(), documentStatus: docStatus }).filter(([, v]) => v),
+              ),
+            }),
+            executiveId: internal ? '' : l.executiveId,
+            documentName: l.documentName === 'Other' ? documentOther.trim() : l.documentName,
+            contact: internal ? '' : digits(l.contact) || digits(form.contact),
+            km: l.km === '' ? null : Number(l.km),
+            attachments: l.attachments.map(({ file, name, type, size }) => ({ file, name, type, size })),
+          };
+        }),
       });
       await refresh();
       setCreated(c);
@@ -112,7 +130,7 @@ export default function NewCase() {
 
   function reset() {
     setCreated(null);
-    setForm({ bankId: form.bankId, customerName: '', product: '', contact: '', tatType: form.tatType });
+    setForm({ ...EMPTY_FORM, bankId: form.bankId, tatType: form.tatType });
     setLegs([newLeg('RESIDENCE')]);
     setErrors({});
     window.scrollTo({ top: 0 });
@@ -144,20 +162,7 @@ export default function NewCase() {
                   ))}
                 </select>
               </Field>
-              <Field label="Customer name" required error={errors.customerName}>
-                <input value={form.customerName} onChange={set('customerName')} placeholder="As per application" />
-              </Field>
-              <Field label="Product" required error={errors.product}>
-                <input list="products" value={form.product} onChange={set('product')} placeholder="For example, Used Car Loan" />
-                <datalist id="products">
-                  {PRODUCTS.map((p) => (
-                    <option key={p} value={p} />
-                  ))}
-                </datalist>
-              </Field>
-              <Field label="Customer contact number" required error={errors.contact}>
-                <input inputMode="numeric" value={form.contact} onChange={set('contact')} placeholder="10-digit mobile" maxLength={14} />
-              </Field>
+              <CaseInfoFields form={form} setForm={setForm} errors={errors} />
               <Field label="TAT" className="span-2" hint={`Deadline: ${fmtDateTime(deadline)}. After this the case turns red and starts counting extra time.`}>
                 <Segmented
                   value={form.tatType}
@@ -210,6 +215,26 @@ export default function NewCase() {
               <dd>{banks.find((b) => b.id === form.bankId)?.name || '—'}</dd>
               <dt>Customer</dt>
               <dd>{form.customerName || '—'}</dd>
+              {form.coApplicantName && (
+                <>
+                  <dt>Co-applicant</dt>
+                  <dd>{form.coApplicantName}</dd>
+                </>
+              )}
+              <dt>Product</dt>
+              <dd>{product || '—'}</dd>
+              {form.bankerCaseId && (
+                <>
+                  <dt>Banker case ID</dt>
+                  <dd>{form.bankerCaseId}</dd>
+                </>
+              )}
+              {Number(form.loanAmount) > 0 && (
+                <>
+                  <dt>Loan amount</dt>
+                  <dd>{inr(Number(form.loanAmount))}</dd>
+                </>
+              )}
               <dt>TAT</dt>
               <dd>
                 {TAT_TYPES[form.tatType].label} ({TAT_TYPES[form.tatType].hours}h) · due {fmtDateTime(deadline)}
@@ -221,7 +246,11 @@ export default function NewCase() {
               {legs.map((l) => (
                 <li key={l.key}>
                   <TypeChip type={l.type} />
-                  <span>{executives.find((e) => e.id === l.executiveId)?.name || <em className="muted">No executive yet</em>}</span>
+                  <span>
+                    {typeOf(l.type).internal
+                      ? <em className="muted">Admin / OL (internal)</em>
+                      : executives.find((e) => e.id === l.executiveId)?.name || <em className="muted">No executive yet</em>}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -254,6 +283,8 @@ function CreatedBody({ c }) {
   const toast = useToast();
   const url = feedbackUrl(c.feedbackToken);
   const msg = `Dear ${c.customerName}, after our field executive's visit please share your feedback here: ${url} — Reliable Services`;
+  const field = c.legs.filter((l) => !l.internal).length;
+  const internal = c.legs.length - field;
   return (
     <div className="created">
       <div className="created-id">
@@ -263,22 +294,25 @@ function CreatedBody({ c }) {
           <strong className="mono">{c.caseNo}</strong>
         </div>
       </div>
-      <p>
-        {c.legs.length > 1 ? `${c.legs.length} verifications were` : 'The verification was'} assigned and will appear in the executive app right away.
-      </p>
-      <div className="feedback-box">
-        <span className="field-label">Customer feedback link</span>
-        <div className="copy-row">
-          <input readOnly value={url} onFocus={(e) => e.target.select()} />
-          <button className="btn btn-dark btn-sm" onClick={async () => toast((await copyText(url)) ? 'Link copied' : 'Could not copy')}>
-            <Icon name="copy" size={15} /> Copy
-          </button>
-          <a className="btn btn-ghost btn-sm" target="_blank" rel="noreferrer" href={`https://wa.me/91${c.contact}?text=${encodeURIComponent(msg)}`}>
-            <Icon name="whatsapp" size={15} /> WhatsApp
-          </a>
+      {field > 0 && (
+        <p>{field > 1 ? `${field} verifications were` : 'The verification was'} assigned and will appear in the executive app right away.</p>
+      )}
+      {internal > 0 && <p>Add the bank statement details from the case page when they are ready, then set the final status.</p>}
+      {field > 0 && (
+        <div className="feedback-box">
+          <span className="field-label">Customer feedback link</span>
+          <div className="copy-row">
+            <input readOnly value={url} onFocus={(e) => e.target.select()} />
+            <button className="btn btn-dark btn-sm" onClick={async () => toast((await copyText(url)) ? 'Link copied' : 'Could not copy')}>
+              <Icon name="copy" size={15} /> Copy
+            </button>
+            <a className="btn btn-ghost btn-sm" target="_blank" rel="noreferrer" href={`https://wa.me/91${c.contact}?text=${encodeURIComponent(msg)}`}>
+              <Icon name="whatsapp" size={15} /> WhatsApp
+            </a>
+          </div>
+          <span className="field-hint">Only admins and operational leads can see and share this link.</span>
         </div>
-        <span className="field-hint">Only admins and operational leads can see and share this link.</span>
-      </div>
+      )}
     </div>
   );
 }
@@ -286,26 +320,63 @@ function CreatedBody({ c }) {
 function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, onChange, onRemove }) {
   const t = typeOf(leg.type);
   const err = (k) => errors[`${leg.key}.${k}`];
-  const link = leg.mapLink || mapLinkFromCoords(leg.lat, leg.lng);
+  const coords = coordsFromLink(leg.mapLink);
   const dir = directionsLink(leg.fromPlace, leg.toPlace);
+  const pinOk = PINCODE_RE.test(leg.pincode);
 
-  const onLink = (v) => {
-    const c = coordsFromLink(v);
-    onChange(c ? { mapLink: v, lat: c.lat, lng: c.lng } : { mapLink: v });
+  // nearest executives first (by PIN code), then fewer open cases
+  const ranked = useMemo(() => rankByPincode(execs, pinOk ? leg.pincode : '', openLoad), [execs, leg.pincode, pinOk, openLoad]);
+  const suggestion = pinOk ? suggestExecutive(execs, leg.pincode, openLoad) : null;
+
+  const onPincode = (v) => {
+    const pincode = v.replace(/\D/g, '').slice(0, 6);
+    const patch = { pincode };
+    // auto-pick the nearest executive until the user chooses one by hand
+    if (!leg.execPicked && !t.internal && PINCODE_RE.test(pincode)) {
+      patch.executiveId = suggestExecutive(execs, pincode, openLoad)?.exec.id || '';
+    }
+    onChange(patch);
   };
-  const onCoord = (k, v) => onChange({ [k]: v, mapLink: '' });
-
-  const place = `${leg.toPlace} ${leg.address}`.toLowerCase();
-  const sortedExecs = [...execs].sort((a, b) => {
-    const am = place.includes(a.location.toLowerCase()) ? 0 : 1;
-    const bm = place.includes(b.location.toLowerCase()) ? 0 : 1;
-    return am - bm || (openLoad[a.id] || 0) - (openLoad[b.id] || 0);
-  });
 
   const onFiles = (files) => {
     const list = Array.from(files).filter((f) => f.type.startsWith('image/') || f.type === 'application/pdf');
     onChange({ attachments: [...leg.attachments, ...list.map((f) => ({ file: f, name: f.name, type: f.type, size: f.size, preview: f.type.startsWith('image/') ? URL.createObjectURL(f) : null }))] });
   };
+
+  const attachments = (label, min) => (
+    <div className="span-2">
+      <Field label={label} required={min > 0} error={err('attachments')}>
+        <div
+          className="dropzone"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            onFiles(e.dataTransfer.files);
+          }}
+        >
+          <Icon name="upload" size={22} />
+          <span>
+            Drop files here or <u>browse</u>
+          </span>
+          <small>{min ? `${leg.attachments.length} / ${min} minimum` : `${leg.attachments.length} added`}</small>
+          <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => onFiles(e.target.files)} />
+        </div>
+      </Field>
+      {leg.attachments.length > 0 && (
+        <ul className="thumbs">
+          {leg.attachments.map((a, i) => (
+            <li key={i}>
+              {a.preview ? <img src={a.preview} alt="" /> : <Icon name="file" size={22} />}
+              <span title={a.name}>{a.name}</span>
+              <button type="button" onClick={() => onChange({ attachments: leg.attachments.filter((_, j) => j !== i) })} aria-label="Remove file">
+                <Icon name="x" size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
   return (
     <section className={`card leg-card tone-${t.tone}`}>
@@ -324,120 +395,161 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
         )}
       </div>
 
-      <div className="form-grid">
-        {t.isDocument && (
-          <>
-            <Field label="Document name" required error={err('documentName')}>
-              <select value={leg.documentName} onChange={(e) => onChange({ documentName: e.target.value })}>
-                <option value="">Choose document</option>
-                {DOCUMENT_NAMES.map((d) => (
-                  <option key={d}>{d}</option>
-                ))}
-              </select>
+      {t.isDocument && t.internal ? (
+        <div className="form-grid">
+          <div className="alert alert-yellow span-2">
+            <Icon name="manual" size={16} /> Internal check document — no field visit. Fill the details now (they print on the bank report) or later from the case page.
+          </div>
+          <Field label="Document type" required error={err('documentName')}>
+            <select value={leg.documentName} onChange={(e) => onChange({ documentName: e.target.value })}>
+              <option value="">Choose document</option>
+              {DOCUMENT_NAMES.map((d) => (
+                <option key={d}>{d}</option>
+              ))}
+            </select>
+          </Field>
+          {leg.documentName === 'Other' ? (
+            <Field label="Specify document" required>
+              <input value={leg.documentOther} onChange={(e) => onChange({ documentOther: e.target.value })} />
             </Field>
-            {leg.documentName === 'Other' ? (
-              <Field label="Specify document" required>
-                <input value={leg.documentOther} onChange={(e) => onChange({ documentOther: e.target.value })} />
-              </Field>
-            ) : (
-              <Field label="Contact person number" hint="If available">
-                <input inputMode="numeric" value={leg.contactPerson} onChange={(e) => onChange({ contactPerson: e.target.value })} />
-              </Field>
-            )}
-            <div className="span-2">
-              <Field label={`Document attachments (min ${MIN_DOCS} photos / PDF)`} required error={err('attachments')}>
-                <div
-                  className="dropzone"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    onFiles(e.dataTransfer.files);
-                  }}
-                >
-                  <Icon name="upload" size={22} />
-                  <span>
-                    Drop files here or <u>browse</u>
-                  </span>
-                  <small>{leg.attachments.length} / {MIN_DOCS} minimum</small>
-                  <input type="file" multiple accept="image/*,application/pdf" onChange={(e) => onFiles(e.target.files)} />
-                </div>
-              </Field>
-              {leg.attachments.length > 0 && (
-                <ul className="thumbs">
-                  {leg.attachments.map((a, i) => (
-                    <li key={i}>
-                      {a.preview ? <img src={a.preview} alt="" /> : <Icon name="file" size={22} />}
-                      <span title={a.name}>{a.name}</span>
-                      <button type="button" onClick={() => onChange({ attachments: leg.attachments.filter((_, j) => j !== i) })} aria-label="Remove file">
-                        <Icon name="x" size={13} />
-                      </button>
-                    </li>
+          ) : (
+            <Field label="Document No.">
+              <input value={leg.docNo} onChange={(e) => onChange({ docNo: e.target.value })} placeholder="e.g. KH/DVG/2024/1187" />
+            </Field>
+          )}
+          {leg.documentName === 'Other' && (
+            <Field label="Document No.">
+              <input value={leg.docNo} onChange={(e) => onChange({ docNo: e.target.value })} placeholder="e.g. KH/DVG/2024/1187" />
+            </Field>
+          )}
+          <Field label="Document status">
+            <select value={leg.docStatus} onChange={(e) => onChange({ docStatus: e.target.value })}>
+              <option value="">Not checked yet</option>
+              {['Genuine', 'Fake', 'Could not verify'].map((d) => (
+                <option key={d}>{d}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Verification details" className="span-2" hint="Printed on the bank report. Leave empty to fill in later.">
+            <textarea rows={3} value={leg.docDetails} onChange={(e) => onChange({ docDetails: e.target.value })} placeholder="e.g. Checked with the Taluk office register — owner name, survey no. and issue date match." />
+          </Field>
+          <Field label={t.placeLabel} className="span-2">
+            <input value={leg.address} onChange={(e) => onChange({ address: e.target.value })} placeholder="e.g. Taluk Office, Davanagere" />
+          </Field>
+          {attachments('Document copies (photos / PDF, optional)', 0)}
+        </div>
+      ) : t.internal ? (
+        <div className="form-grid">
+          <div className="alert alert-yellow span-2">
+            <Icon name="manual" size={16} /> No field visit. After creating the case, open it and use <strong>Add details</strong> to enter the statement findings, then set the final status.
+          </div>
+          <Field label={t.placeLabel} required className="span-2" error={err('address')}>
+            <input value={leg.address} onChange={(e) => onChange({ address: e.target.value })} placeholder="e.g. Canara Bank, Vidyanagar branch, Hubballi" />
+          </Field>
+          <Field label="What to check" className="span-2">
+            <textarea rows={2} value={leg.trigger} onChange={(e) => onChange({ trigger: e.target.value })} placeholder="e.g. Verify last 6 months statement and salary credits with the branch" />
+          </Field>
+          {attachments('Bank statement (PDF / photos, optional)', 0)}
+        </div>
+      ) : (
+        <div className="form-grid">
+          {t.isDocument && (
+            <>
+              <div className="alert alert-blue span-2">
+                <Icon name="route" size={16} />
+                <span>
+                  Allocated to a field executive, who verifies the document at the issuing office and answers the questions in the app. For an office-only check,
+                  choose <strong>Internal check document</strong> instead.
+                </span>
+              </div>
+              <Field label="Document type" required error={err('documentName')}>
+                <select value={leg.documentName} onChange={(e) => onChange({ documentName: e.target.value })}>
+                  <option value="">Choose document</option>
+                  {DOCUMENT_NAMES.map((d) => (
+                    <option key={d}>{d}</option>
                   ))}
-                </ul>
+                </select>
+              </Field>
+              {leg.documentName === 'Other' ? (
+                <Field label="Specify document" required>
+                  <input value={leg.documentOther} onChange={(e) => onChange({ documentOther: e.target.value })} />
+                </Field>
+              ) : (
+                <span />
+              )}
+              {attachments('Document copies for the executive (photos / PDF, optional)', 0)}
+            </>
+          )}
+
+          <Field label={t.placeLabel} required={!t.isDocument} className="span-2" error={err('address')}>
+            <textarea rows={2} value={leg.address} onChange={(e) => onChange({ address: e.target.value })} placeholder={t.isDocument ? 'e.g. Taluk Office, Davanagere' : 'Full address with landmark'} />
+          </Field>
+
+          <Field label="PIN code" required={!t.isDocument} error={err('pincode')} hint="The nearest executive is picked from this">
+            <input inputMode="numeric" maxLength={6} value={leg.pincode} onChange={(e) => onPincode(e.target.value)} placeholder="580021" />
+          </Field>
+          <Field label="Google Maps link" error={err('mapLink')} hint={coords ? `Location read from link: ${coords.lat}, ${coords.lng}` : 'Paste the location link (optional)'}>
+            <div className="input-icon">
+              <Icon name="link" size={16} />
+              <input value={leg.mapLink} onChange={(e) => onChange({ mapLink: e.target.value.trim() })} placeholder="https://maps.google.com/…" />
+              {leg.mapLink && /^https:\/\//i.test(leg.mapLink) && (
+                <a className="btn btn-ghost btn-xs" href={leg.mapLink} target="_blank" rel="noreferrer">
+                  <Icon name="pin" size={14} /> Open
+                </a>
               )}
             </div>
-          </>
-        )}
+          </Field>
 
-        <Field label={t.placeLabel} required={!t.isDocument} className="span-2" error={err('address')}>
-          <textarea rows={2} value={leg.address} onChange={(e) => onChange({ address: e.target.value })} placeholder={t.isDocument ? 'e.g. Taluk Office, Davanagere' : 'Full address with landmark and pin code'} />
-        </Field>
-
-        <Field label="Google Maps link" className="span-2" hint="Paste a link, or enter latitude / longitude below — the link is built automatically.">
-          <div className="input-icon">
-            <Icon name="link" size={16} />
-            <input value={leg.mapLink} onChange={(e) => onLink(e.target.value)} placeholder="https://www.google.com/maps/search/?api=1&query=…" />
-            {link && (
-              <a className="btn btn-ghost btn-xs" href={link} target="_blank" rel="noreferrer">
-                <Icon name="pin" size={14} /> Open in Maps
+          <div className="span-2 route-row">
+            <Field label="From (place)">
+              <input value={leg.fromPlace} onChange={(e) => onChange({ fromPlace: e.target.value })} placeholder="e.g. Hubballi office" />
+            </Field>
+            <Icon name="route" size={18} className="route-icon" />
+            <Field label="To (place)">
+              <input value={leg.toPlace} onChange={(e) => onChange({ toPlace: e.target.value })} placeholder="e.g. Kalaburagi" />
+            </Field>
+            <Field label="Distance (km)" error={err('km')}>
+              <input type="number" min="0" step="0.1" value={leg.km} onChange={(e) => onChange({ km: e.target.value })} />
+            </Field>
+            {dir && (
+              <a className="link small route-check" href={dir} target="_blank" rel="noreferrer">
+                Check route in Maps
               </a>
             )}
           </div>
-        </Field>
-        <Field label="Latitude">
-          <input inputMode="decimal" value={leg.lat} onChange={(e) => onCoord('lat', e.target.value)} placeholder="14.621080" />
-        </Field>
-        <Field label="Longitude">
-          <input inputMode="decimal" value={leg.lng} onChange={(e) => onCoord('lng', e.target.value)} placeholder="76.701485" />
-        </Field>
 
-        <div className="span-2 route-row">
-          <Field label="From (place)">
-            <input value={leg.fromPlace} onChange={(e) => onChange({ fromPlace: e.target.value })} placeholder="e.g. Hubballi office" />
-          </Field>
-          <Icon name="route" size={18} className="route-icon" />
-          <Field label="To (place)">
-            <input value={leg.toPlace} onChange={(e) => onChange({ toPlace: e.target.value })} placeholder="e.g. Kalaburagi" />
-          </Field>
-          <Field label="Distance (km)" error={err('km')}>
-            <input type="number" min="0" step="0.1" value={leg.km} onChange={(e) => onChange({ km: e.target.value })} />
-          </Field>
-          {dir && (
-            <a className="link small route-check" href={dir} target="_blank" rel="noreferrer">
-              Check route in Maps
-            </a>
+          {!t.isDocument && (
+            <Field label="Contact number at this location" hint={defaultContact ? `Leave blank to use ${defaultContact}` : 'Leave blank to use the customer number'}>
+              <input inputMode="numeric" value={leg.contact} onChange={(e) => onChange({ contact: e.target.value })} />
+            </Field>
           )}
-        </div>
-
-        {!t.isDocument && (
-          <Field label="Contact number at this location" hint={defaultContact ? `Leave blank to use ${defaultContact}` : 'Leave blank to use the customer number'}>
-            <input inputMode="numeric" value={leg.contact} onChange={(e) => onChange({ contact: e.target.value })} />
+          <Field label="Assign field executive" required error={err('executiveId')} className={t.isDocument ? 'span-2' : ''}>
+            <select value={leg.executiveId} onChange={(e) => onChange({ executiveId: e.target.value, execPicked: true })}>
+              <option value="">{pinOk ? 'Choose executive' : 'Enter the PIN code to see the nearest'}</option>
+              {ranked.map(({ exec: e, match, open }) => (
+                <option key={e.id} value={e.id}>
+                  {e.name} — {e.location}
+                  {pinOk && match.label ? ` · ${match.label}` : ''} · {open} open
+                </option>
+              ))}
+            </select>
+            {suggestion && (
+              <span className={`nearest ${leg.executiveId === suggestion.exec.id ? 'is-picked' : ''}`}>
+                <Icon name="pin" size={13} /> Nearest: <strong>{suggestion.exec.name}</strong> ({suggestion.match.label}, PIN {suggestion.exec.pincode}, {suggestion.open} open)
+                {leg.executiveId !== suggestion.exec.id && (
+                  <button type="button" className="link-btn" onClick={() => onChange({ executiveId: suggestion.exec.id, execPicked: true })}>
+                    Use
+                  </button>
+                )}
+              </span>
+            )}
+            {pinOk && !suggestion && <span className="field-hint">No executive based in this district — choose manually.</span>}
           </Field>
-        )}
-        <Field label="Assign field executive" required error={err('executiveId')} className={t.isDocument ? 'span-2' : ''}>
-          <select value={leg.executiveId} onChange={(e) => onChange({ executiveId: e.target.value })}>
-            <option value="">Choose executive</option>
-            {sortedExecs.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name} — {e.location} · {openLoad[e.id] || 0} open
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Trigger (what the executive should check)" className="span-2">
-          <textarea rows={2} value={leg.trigger} onChange={(e) => onChange({ trigger: e.target.value })} placeholder="e.g. Check properly whether the property belongs to the applicant's uncle" />
-        </Field>
-      </div>
+          <Field label="Trigger (what the executive should check)" className="span-2">
+            <textarea rows={2} value={leg.trigger} onChange={(e) => onChange({ trigger: e.target.value })} placeholder="e.g. Check properly whether the property belongs to the applicant's uncle" />
+          </Field>
+        </div>
+      )}
     </section>
   );
 }

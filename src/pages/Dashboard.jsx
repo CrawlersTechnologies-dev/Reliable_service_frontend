@@ -1,15 +1,25 @@
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import * as api from '../api';
 import { useAuth, useData, useNow } from '../context/AppContext';
 import { Avatar, Empty, PageHeader, Stat, TatBadge, TypeChip } from '../components/ui';
 import Icon from '../components/Icon';
 import { caseStatus, caseTat } from '../utils/tat';
-import { fmtLongDate } from '../utils/format';
+import { fmtDate, fmtLongDate } from '../utils/format';
+import { isBirthday } from '../utils/birthday';
+import CheckInCard from '../components/CheckInCard';
+import RetentionCard from '../components/RetentionCard';
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { cases, banks, bankById, executives, execById, logins } = useData();
   const now = useNow();
   const navigate = useNavigate();
+  const [birthdays, setBirthdays] = useState([]);
+  useEffect(() => {
+    api.users.birthdays(7).then(setBirthdays).catch(() => setBirthdays([]));
+  }, []);
+  const myBirthday = isBirthday(user.dob);
 
   const enriched = cases.map((c) => ({ c, tat: caseTat(c, now), status: caseStatus(c) }));
   const open = enriched.filter((x) => x.status !== 'CLOSED');
@@ -58,6 +68,18 @@ export default function Dashboard() {
         }
       />
 
+      {myBirthday && (
+        <div className="bday-banner">
+          <Icon name="cake" size={26} />
+          <div>
+            <strong>Happy birthday, {user.name.split(' ')[0]}!</strong>
+            <span>Wishing you a wonderful year ahead from everyone at Reliable Services.</span>
+          </div>
+        </div>
+      )}
+
+      {!isAdmin && <CheckInCard />}
+
       <div className="stats">
         <Stat label="Open cases" value={open.length} icon="folder" foot={`${enriched.length} total`} onClick={() => navigate('/cases')} />
         <Stat label="In process · in TAT" value={inTat.length} tone="green" icon="clock" foot="Running within time" onClick={() => navigate('/cases?tab=in-tat')} />
@@ -66,7 +88,9 @@ export default function Dashboard() {
         <Stat label="Closed this month" value={closedMonth.length} tone="ink" icon="checkCircle" foot="Reports ready for bank" onClick={() => navigate('/cases?tab=closed')} />
       </div>
 
-      <div className="grid-2 dash-grid">
+      {isAdmin && <RetentionCard />}
+
+      <div className={isAdmin ? 'grid-2 dash-grid' : 'dash-grid'}>
         <section className="card">
           <div className="card-head">
             <div>
@@ -101,6 +125,7 @@ export default function Dashboard() {
           )}
         </section>
 
+        {isAdmin && (
         <section className="card">
           <div className="card-head">
             <div>
@@ -131,8 +156,12 @@ export default function Dashboard() {
             ))}
           </ul>
         </section>
+        )}
       </div>
 
+      {birthdays.length > 0 && <Birthdays items={birthdays} meId={user.id} />}
+
+      {isAdmin && (
       <section className="card">
         <div className="card-head">
           <div>
@@ -175,6 +204,43 @@ export default function Dashboard() {
           </table>
         </div>
       </section>
+      )}
     </div>
+  );
+}
+
+const ROLE_LABEL = { ADMIN: 'Admin', OL: 'Operational lead', EXECUTIVE: 'Field executive' };
+
+function Birthdays({ items, meId }) {
+  const today = items.filter((b) => b.inDays === 0);
+  const soon = items.filter((b) => b.inDays > 0);
+  return (
+    <section className="card bday-card">
+      <div className="card-head">
+        <div>
+          <h2>
+            <Icon name="cake" size={18} /> Birthdays
+          </h2>
+          <p>{today.length ? `${today.length} today — send your wishes` : 'Coming up this week'}</p>
+        </div>
+      </div>
+      <ul className="bday-list">
+        {[...today, ...soon].map((b) => (
+          <li key={b.id} className={b.inDays === 0 ? 'is-today' : ''}>
+            <Avatar name={b.name} photo={b.photo} size={34} />
+            <div>
+              <strong>
+                {b.name}
+                {b.id === meId && ' (you)'}
+              </strong>
+              <span className="muted small">
+                {ROLE_LABEL[b.role]} · {b.employeeId}
+              </span>
+            </div>
+            <span className="bday-when">{b.inDays === 0 ? 'Today' : b.inDays === 1 ? 'Tomorrow' : fmtDate(b.date)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

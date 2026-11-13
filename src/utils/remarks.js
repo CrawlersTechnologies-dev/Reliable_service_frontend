@@ -1,6 +1,7 @@
 // Turns the executive's questionnaire answers into the structured findings
 // paragraphs used in the bank report (same wording style as the agency's templates).
 import { pad2 } from './format';
+import { VERIFICATION_TYPES } from '../config/verification';
 
 const v = (x, fallback = '—') => (x === '' || x == null ? fallback : x);
 const lower = (x) => (x ? String(x).toLowerCase() : '—');
@@ -12,8 +13,27 @@ const political = (f) =>
 const tpc = (f) => (f.neighbour ? `TPC ${f.neighbour} confirmed with ${lower(v(f.neighbourFeedback, 'no'))} feedback.` : null);
 
 export function buildRemarks(type, f = {}, leg = {}) {
+  // Details entered by Admin / OL in the office may be partial, so no auto-written
+  // sentences (they would state things that were never checked): the report shows
+  // the filled answers as a table plus the remarks they typed.
+  // When every answer was filled in, the full write-up is used as for a field visit.
+  const extra = leg.manualRemarks ? [['Remarks', leg.manualRemarks]] : [];
+  if (leg.manual) {
+    const t = VERIFICATION_TYPES[type];
+    const complete = t?.fields.every((fd) => (fd.showIf && !fd.showIf(f)) || (f[fd.key] !== undefined && f[fd.key] !== ''));
+    return complete ? [...typeRemarks(type, f, leg), ...extra] : extra;
+  }
+  return typeRemarks(type, f, leg);
+}
+
+function typeRemarks(type, f = {}, leg = {}) {
   const place = leg.address || 'the given address';
   switch (type) {
+    case 'BANK_STATEMENT':
+      return [
+        ['Bank statement verification', `Statement of ${v(f.accountHolder)} held with ${v(f.statementBank, place)} for the period ${v(f.statementPeriod)} was verified by ${lower(f.verificationMode)} with ${v(f.verifiedWith)}.`],
+        ['Result', `Statement reported as ${lower(f.statementStatus)}. Average monthly balance ₹${v(f.averageBalance)}; ${pad2(f.chequeReturns)} cheque / ECS returns; salary / income credits: ${lower(f.salaryCredits)}.`],
+      ];
     case 'RESIDENCE':
       return [
         ['Residence verification', `The executive visited ${place} and met ${v(f.metPerson)} (${v(f.relationship)}), who confirmed that the applicant and family have been residing at the current residence in ${article(f.ownership)} ${lower(f.ownership)} house for approximately ${v(f.yearsInStay)} years.${f.rentAmount && f.ownership !== 'Owned' ? ` Monthly rent/lease is ₹${f.rentAmount}.` : ''}`],
@@ -46,8 +66,19 @@ export function buildRemarks(type, f = {}, leg = {}) {
       ];
     case 'DOCUMENT':
       return [
-        ['Document verification', `${v(leg.documentName, 'The document')} was verified with the issuing authority. The executive met ${v(f.metPerson)} (${v(f.designation)}).`],
-        ['Result', `Document reported as ${lower(f.documentStatus)}. Issued by: ${v(f.issuedBy)}.`],
+        [
+          'Document check',
+          `The executive visited ${place} to verify ${v(leg.documentName, 'the document')}${f.documentNo ? ` (No. ${f.documentNo})` : ''}${f.verifiedWith ? ` and checked it with ${f.verifiedWith}` : ''}${f.documentStatus ? `. The document was found ${lower(f.documentStatus)}` : ''}.`,
+        ],
+        ...(f.details ? [['Details', f.details]] : []),
+      ];
+    case 'INTERNAL_DOCUMENT':
+      return [
+        [
+          'Internal check document',
+          `${v(leg.documentName, 'The document')}${f.documentNo ? ` (No. ${f.documentNo})` : ''} was checked internally by the office${f.documentStatus ? ` and found ${lower(f.documentStatus)}` : ''}.`,
+        ],
+        ...(f.details ? [['Details', f.details]] : []),
       ];
     default:
       return [];

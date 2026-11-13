@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../api';
-import { useAuth, useData, useToast } from '../context/AppContext';
+import { useData, useToast } from '../context/AppContext';
 import { Field, Modal, PageHeader, Pill } from '../components/ui';
 import Icon from '../components/Icon';
 import { caseStatus } from '../utils/tat';
 
-const EMPTY = { name: '', code: '', contactPerson: '', contactNumber: '', email: '', city: '', status: 'Active' };
+// Admin only (the OL panel has no Banks page).
+const NEW_MANAGER = { name: '', designation: '', mobile: '', email: '' };
+const EMPTY = { name: '', code: '', managers: [{ ...NEW_MANAGER }], status: 'Active' };
 
 export default function Banks() {
-  const { isAdmin } = useAuth();
   const { banks, cases, refresh } = useData();
   const toast = useToast();
   const navigate = useNavigate();
@@ -19,17 +20,30 @@ export default function Banks() {
 
   const open = (b) => {
     setEditing(b || {});
-    setForm(b ? { ...EMPTY, ...b } : EMPTY);
+    setForm(
+      b
+        ? { name: b.name, code: b.code, status: b.status, managers: b.managers?.length ? b.managers.map((m) => ({ ...NEW_MANAGER, ...m })) : [{ ...NEW_MANAGER }] }
+        : { ...EMPTY, managers: [{ ...NEW_MANAGER }] },
+    );
     setErr('');
   };
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setManager = (i, k) => (e) =>
+    setForm((f) => ({ ...f, managers: f.managers.map((m, j) => (j === i ? { ...m, [k]: e.target.value } : m)) }));
+  const addManager = () => setForm((f) => ({ ...f, managers: [...f.managers, { ...NEW_MANAGER }] }));
+  const removeManager = (i) => setForm((f) => ({ ...f, managers: f.managers.filter((_, j) => j !== i) }));
 
   async function save(e) {
     e.preventDefault();
     if (!form.name.trim() || !form.code.trim()) return setErr('Bank name and code are required.');
+    // rows left completely blank are ignored
+    const managers = form.managers.filter((m) => m.name.trim() || m.mobile.trim() || m.email.trim());
+    if (managers.some((m) => !m.name.trim())) return setErr('Every manager row needs a name.');
+    if (managers.some((m) => m.mobile && !/^\d{10}$/.test(m.mobile))) return setErr('Manager mobile numbers must be 10 digits.');
     try {
-      if (editing.id) await api.banks.update(editing.id, form);
-      else await api.banks.create(form);
+      const body = { name: form.name, code: form.code, status: form.status, managers };
+      if (editing.id) await api.banks.update(editing.id, body);
+      else await api.banks.create(body);
       await refresh();
       toast(editing.id ? 'Bank updated' : 'Bank added');
       setEditing(null);
@@ -42,13 +56,11 @@ export default function Banks() {
     <div className="page">
       <PageHeader
         title="Banks"
-        subtitle={isAdmin ? 'Client banks available while creating cases' : 'Client banks (only the admin can add or edit)'}
+        subtitle="Client banks and their managers"
         actions={
-          isAdmin && (
-            <button className="btn btn-primary" onClick={() => open(null)}>
-              <Icon name="plus" /> Add bank
-            </button>
-          )
+          <button className="btn btn-primary" onClick={() => open(null)}>
+            <Icon name="plus" /> Add bank
+          </button>
         }
       />
       <div className="bank-grid">
@@ -61,24 +73,36 @@ export default function Banks() {
                 <span className="bank-mono">{b.code.slice(0, 4)}</span>
                 <div>
                   <h3>{b.name}</h3>
-                  <span className="muted small">{b.city || '—'}</span>
+                  <span className="muted small">
+                    {b.managers?.length || 0} manager{b.managers?.length === 1 ? '' : 's'}
+                  </span>
                 </div>
                 <Pill tone={b.status === 'Active' ? 'green' : 'slate'}>{b.status}</Pill>
               </div>
-              <dl className="bank-meta">
-                <div><dt>Contact</dt><dd>{b.contactPerson || '—'}</dd></div>
-                <div><dt>Phone</dt><dd className="mono">{b.contactNumber || '—'}</dd></div>
-                <div className="span-2"><dt>Email</dt><dd>{b.email || '—'}</dd></div>
-              </dl>
+              {b.managers?.length ? (
+                <ul className="manager-list">
+                  {b.managers.map((m, i) => (
+                    <li key={i}>
+                      <div>
+                        <strong>{m.name}</strong>
+                        {m.designation && <span className="muted small"> · {m.designation}</span>}
+                      </div>
+                      <div className="muted small">
+                        {[m.mobile, m.email].filter(Boolean).join(' · ') || '—'}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted small">No managers added yet.</p>
+              )}
               <div className="bank-foot">
                 <button className="link-btn" onClick={() => navigate(`/cases?bank=${b.id}`)}>
                   {mine.length} cases · {openCount} open <Icon name="chevronRight" size={14} />
                 </button>
-                {isAdmin && (
-                  <button className="btn btn-ghost btn-xs" onClick={() => open(b)}>
-                    <Icon name="edit" size={13} /> Edit
-                  </button>
-                )}
+                <button className="btn btn-ghost btn-xs" onClick={() => open(b)}>
+                  <Icon name="edit" size={13} /> Edit
+                </button>
               </div>
             </div>
           );
@@ -88,6 +112,7 @@ export default function Banks() {
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
+        width={720}
         title={editing?.id ? 'Edit bank' : 'Add bank'}
         footer={
           <>
@@ -103,24 +128,32 @@ export default function Banks() {
           <Field label="Short code" required hint="Shown on case lists">
             <input value={form.code} onChange={set('code')} placeholder="HDFC" maxLength={8} />
           </Field>
-          <Field label="City">
-            <input value={form.city} onChange={set('city')} />
-          </Field>
-          <Field label="Contact person">
-            <input value={form.contactPerson} onChange={set('contactPerson')} />
-          </Field>
-          <Field label="Contact number">
-            <input inputMode="numeric" value={form.contactNumber} onChange={set('contactNumber')} />
-          </Field>
-          <Field label="Email ID" className="span-2" hint="Where final reports are sent">
-            <input type="email" value={form.email} onChange={set('email')} />
-          </Field>
           <Field label="Status">
             <select value={form.status} onChange={set('status')}>
               <option>Active</option>
               <option>Inactive</option>
             </select>
           </Field>
+
+          <div className="span-2 managers-edit">
+            <div className="managers-head">
+              <span className="field-label">Bank managers</span>
+              <button type="button" className="btn btn-ghost btn-xs" onClick={addManager}>
+                <Icon name="plus" size={13} /> Add manager
+              </button>
+            </div>
+            {form.managers.map((m, i) => (
+              <div className="manager-row" key={i}>
+                <input value={m.name} onChange={setManager(i, 'name')} placeholder="Name" aria-label={`Manager ${i + 1} name`} />
+                <input value={m.designation} onChange={setManager(i, 'designation')} placeholder="Designation" aria-label={`Manager ${i + 1} designation`} />
+                <input value={m.mobile} onChange={setManager(i, 'mobile')} placeholder="Mobile" inputMode="numeric" maxLength={10} aria-label={`Manager ${i + 1} mobile`} />
+                <input type="email" value={m.email} onChange={setManager(i, 'email')} placeholder="Email" aria-label={`Manager ${i + 1} email`} />
+                <button type="button" className="icon-btn" onClick={() => removeManager(i)} title="Remove manager" disabled={form.managers.length === 1}>
+                  <Icon name="trash" size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
           {err && <div className="alert alert-red span-2">{err}</div>}
         </form>
       </Modal>

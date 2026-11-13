@@ -99,11 +99,18 @@ export const users = {
   // returns { user, tempPassword } — show the password once to the admin
   create: (data) => request('POST', '/api/users', { body: data }),
   update: async (id, data) => (await request('PATCH', `/api/users/${id}`, { body: data })).user,
-  resetPassword: async (id) => (await request('POST', `/api/users/${id}/reset-password`)).tempPassword,
+  // password: typed by the admin, or '' to generate one
+  resetPassword: async (id, password = '') => (await request('POST', `/api/users/${id}/reset-password`, { body: password ? { password } : {} })).tempPassword,
+  // birthdays today and in the next `days` days (all roles)
+  birthdays: async (days = 7) => (await request('GET', `/api/users/birthdays${qs({ days })}`)).items,
 };
 
 // ---------------- Cases ----------------
 export const cases = {
+  // previous 3 months' cases with the same mobile(s) / PAN
+  dedupe: ({ mobiles = [], pan = '', excludeId = '' }) => request('GET', `/api/cases/dedupe${qs({ mobile: mobiles.filter(Boolean).join(','), pan, excludeId })}`),
+  // closed cases due for automatic deletion within `days` + recent deletion log (admin)
+  retention: (days = 7) => request('GET', `/api/cases/retention?days=${days}`),
   list: async (filters = {}) => (await request('GET', `/api/cases${qs(filters)}`)).items,
   get: async (id) => (await request('GET', `/api/cases/${id}`)).case,
   // legs[i].attachments may hold { file } entries (document verification) — uploaded after the case is created
@@ -121,6 +128,21 @@ export const cases = {
   },
   reassign: async (caseId, legId, executiveId) => (await request('PATCH', `/api/cases/${caseId}/legs/${legId}/assign`, { body: { executiveId } })).case,
   setOutcome: async (caseId, data) => (await request('POST', `/api/cases/${caseId}/outcome`, { body: data })).case,
+  // why the case crossed its TAT ('' clears it)
+  rework: async (caseId, legId, reason) => (await request('POST', `/api/cases/${caseId}/legs/${legId}/rework`, { body: { reason } })).case,
+  editSubmitted: async (caseId, legId, data) => (await request('PATCH', `/api/cases/${caseId}/legs/${legId}/details`, { body: data })).case,
+  setHolidays: async (caseId, holidays) => (await request('PATCH', `/api/cases/${caseId}/holidays`, { body: { holidays } })).case,
+  updateDetails: async (caseId, data) => (await request('PATCH', `/api/cases/${caseId}/details`, { body: data })).case,
+  setTatReason: async (caseId, text) => (await request('PATCH', `/api/cases/${caseId}/tat-reason`, { body: { text } })).case,
+  // Admin / OL fill the details themselves (Bank statement or office-handled cases)
+  completeManually: async (caseId, legId, { findings, remarks, files = [] }) => {
+    if (files.length) {
+      const form = new FormData();
+      files.forEach((f) => form.append('files', f, f.name));
+      await request('POST', `/api/cases/${caseId}/legs/${legId}/attachments`, { form });
+    }
+    return (await request('POST', `/api/cases/${caseId}/legs/${legId}/manual`, { body: { findings, remarks } })).case;
+  },
   // DEMO ONLY — backend must run with ENABLE_DEMO_TOOLS=true
   simulateVisit: async (caseId, legId) => (await request('POST', `/api/cases/${caseId}/legs/${legId}/simulate`)).case,
 };
@@ -129,6 +151,41 @@ export const cases = {
 export const feedback = {
   get: (token) => request('GET', `/api/public/feedback/${token}`, { auth: false }),
   submit: (token, data) => request('POST', `/api/public/feedback/${token}`, { body: data, auth: false }),
+};
+
+// ---------------- Daily sampling (bank-branch logins) ----------------
+export const sampling = {
+  list: async (filters = {}) => (await request('GET', `/api/sampling${qs(filters)}`)).items,
+  // data: { samplerId, bankId, branch, totalFiles, totalScreened, totalSampled, totalQuery, remarks }, sheet: File
+  create: async (data, sheet) => {
+    const form = new FormData();
+    Object.entries(data).forEach(([k, v]) => form.append(k, v ?? ''));
+    if (sheet) form.append('sheet', sheet, sheet.name);
+    return (await request('POST', '/api/sampling', { form })).entry;
+  },
+  remove: (id) => request('DELETE', `/api/sampling/${id}`),
+};
+
+// ---------------- Attendance (operational leads) ----------------
+export const attendance = {
+  today: async () => (await request('GET', '/api/attendance/today')).record,
+  checkIn: async (note = '') => (await request('POST', '/api/attendance/check-in', { body: { note } })).record,
+  checkOut: async () => (await request('POST', '/api/attendance/check-out', { body: {} })).record,
+  list: async (filters = {}) => (await request('GET', `/api/attendance${qs(filters)}`)).items,
+};
+
+// ---------------- Discussion – Core chat (Admin + OL) ----------------
+export const chat = {
+  list: async (after) => (await request('GET', `/api/chat${after ? `?after=${encodeURIComponent(after)}` : ''}`)).items,
+  // files: File[] (≤5 images / PDF / Excel / CSV / Word)
+  send: async (text, files = []) => {
+    if (!files.length) return (await request('POST', '/api/chat', { body: { text } })).message;
+    const form = new FormData();
+    form.append('text', text);
+    files.forEach((f) => form.append('files', f, f.name));
+    return (await request('POST', '/api/chat', { form })).message;
+  },
+  remove: (id) => request('DELETE', `/api/chat/${id}`),
 };
 
 // ---------------- Sampling logins ----------------

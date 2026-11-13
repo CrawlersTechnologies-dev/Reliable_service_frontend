@@ -7,6 +7,7 @@ export const AGENCY = {
   tagline: 'Investigation Agency | RCU | Field Verification & Quality Assurance',
   reviewer: 'Narayan Swamy',
   reviewerTitle: 'Agency Manager',
+  address: '# 302, 2nd Floor, Club Road, Court Circle, Hubli',
 };
 
 export const TAT_TYPES = {
@@ -22,20 +23,56 @@ export const OUTCOMES = [
   { key: 'REFER_TO_CREDIT', label: 'Refer to Credit', short: 'Refer', tone: 'blue' },
 ];
 
-export const USER_STATUS = ['Active', 'Inactive', 'Suspended'];
+export const USER_STATUS = ['Active', 'Inactive', 'Suspended', 'Deleted'];
+// field executives: only Active / Delete (a deleted executive cannot log in and is hidden from lists)
+export const EXEC_STATUS = ['Active', 'Deleted'];
 
+// Product dropdown in New case. "Other" lets the user type any product.
 export const PRODUCTS = [
-  'Used Car Loan',
-  'New Car Loan',
-  'Personal Loan',
   'Home Loan',
   'Loan Against Property',
+  'Personal Loan',
   'Business Loan',
+  'Used Car Loan',
+  'New Car Loan',
   'Two Wheeler Loan',
+  'Commercial Vehicle Loan',
+  'Tractor Loan',
+  'Gold Loan',
+  'Education Loan',
+  'Consumer Durable Loan',
   'Credit Card',
+  'Current Account',
+  'Savings Account',
 ];
+export const OTHER = 'Other';
 
 export const DOCUMENT_NAMES = ['Khata', 'RTC', 'Salary Certificate', 'NDC', 'NOC', 'Other'];
+
+// What the executive found when reaching the address (asked before the questionnaire)
+export const VISIT_RESULTS = [
+  { key: 'TRACED', label: 'Traced', hint: 'Address found — fill the full verification' },
+  { key: 'UNTRACEABLE', label: 'Untraceable', hint: 'Address could not be found' },
+  { key: 'REFUSED', label: 'Customer refused', hint: 'Customer / family refused the verification' },
+  { key: 'REVISIT', label: 'Visit later', hint: 'Customer asked to come back later — the visit stays open' },
+];
+
+// Field executives work either as field officers or as samplers
+export const EXEC_TYPES = [
+  { key: 'FIELD_OFFICER', label: 'Field officer' },
+  { key: 'SAMPLER', label: 'Sampler' },
+];
+export const SAMPLER_CATEGORIES = ['Full-time', 'Part-time'];
+export const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+
+// Extra case details (client request)
+export const CUSTOMER_PROFILES = ['Salaried', 'Self Employed', 'Agriculture', 'Contract Worker', 'Unemployed'];
+export const SOURCING_CHANNELS = ['DSA', 'DST'];
+export const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+export const MAX_OTHER_NAMES = 3;
+
+// 6-digit Indian PIN code
+export const PINCODE_RE = /^[1-9]\d{5}$/;
 
 const AREA = ['Village Area', 'Residential', 'Commercial', 'Industrial', 'Community Dominated Area', 'Slum Area'];
 const OWNERSHIP = ['Owned', 'Rent', 'Lease'];
@@ -154,18 +191,35 @@ export const VERIFICATION_TYPES = {
   },
   DOCUMENT: {
     key: 'DOCUMENT',
-    label: 'Document',
+    label: 'Document check',
     code: 'DV',
     tone: 'pink',
-    placeLabel: 'Issuing authority address',
-    isDocument: true,
+    isDocument: true, // allocated to a field executive, who verifies it at the issuing office
+    hint: 'Field executive verifies the document at the issuing office',
+    placeLabel: 'Issuing authority / office',
     fields: [
-      { key: 'metPerson', label: 'Met person', type: 'text' },
-      { key: 'designation', label: 'Designation', type: 'text' },
-      { key: 'documentStatus', label: 'Document', type: 'select', options: ['Genuine', 'Fake'] },
-      { key: 'issuedBy', label: 'Issued by (name & designation)', type: 'text' },
+      { key: 'documentNo', label: 'Document No.', type: 'text' },
+      { key: 'verifiedWith', label: 'Verified with (official name & designation)', type: 'text' },
+      { key: 'details', label: 'Verification details', type: 'textarea' },
+      { key: 'documentStatus', label: 'Document status', type: 'select', options: ['Genuine', 'Fake', 'Could not verify'] },
     ],
-    photos: ['Authority (complete)', 'Authority (complete)', 'Executive + authority selfie', 'Records photo', 'Extra 1', 'Extra 2'],
+    photos: ['Issuing office', 'Executive + office selfie', 'Document / record seen', 'Office name board', 'Extra'],
+  },
+  INTERNAL_DOCUMENT: {
+    key: 'INTERNAL_DOCUMENT',
+    label: 'Internal check document',
+    code: 'IC',
+    tone: 'slate',
+    internal: true, // checked in the office by Admin / OL — no field visit
+    isDocument: true,
+    hint: 'Checked in the office by Admin / OL — document type, number and details',
+    placeLabel: 'Issuing authority / office',
+    fields: [
+      { key: 'documentNo', label: 'Document No.', type: 'text' },
+      { key: 'details', label: 'Verification details', type: 'textarea' },
+      { key: 'documentStatus', label: 'Document status', type: 'select', options: ['Genuine', 'Fake', 'Could not verify'] },
+    ],
+    photos: [],
   },
   RESI_CUM_OFFICE: {
     key: 'RESI_CUM_OFFICE',
@@ -198,6 +252,27 @@ export const VERIFICATION_TYPES = {
     ],
     photos: ['Complete business', 'Complete business', 'Executive + business selfie', 'Proof of business', 'QR code', 'Stocks'],
   },
+  BANK_STATEMENT: {
+    key: 'BANK_STATEMENT',
+    label: 'Bank statement',
+    code: 'BS',
+    tone: 'slate',
+    internal: true, // handled by Admin / OL in the office — no executive, no field visit, no TAT photos
+    hint: 'Handled internally by Admin / OL — no field executive',
+    placeLabel: 'Statement bank / branch',
+    fields: [
+      { key: 'statementBank', label: 'Statement bank & branch', type: 'text' },
+      { key: 'accountHolder', label: 'Account holder name', type: 'text' },
+      { key: 'statementPeriod', label: 'Statement period', type: 'text' },
+      { key: 'verifiedWith', label: 'Verified with (bank official, designation)', type: 'text' },
+      { key: 'verificationMode', label: 'Verification mode', type: 'select', options: ['Branch visit', 'Phone call', 'Email', 'Online portal'] },
+      { key: 'statementStatus', label: 'Statement', type: 'select', options: ['Genuine', 'Not genuine', 'Tampered', 'Could not verify'] },
+      { key: 'averageBalance', label: 'Average monthly balance (₹)', type: 'number' },
+      { key: 'chequeReturns', label: 'Cheque / ECS returns', type: 'number' },
+      { key: 'salaryCredits', label: 'Salary / income credits seen', type: 'select', options: ['Yes, regular', 'Irregular', 'No'] },
+    ],
+    photos: [],
+  },
 };
 
 export const TYPE_LIST = Object.values(VERIFICATION_TYPES);
@@ -205,11 +280,22 @@ export const typeOf = (key) => VERIFICATION_TYPES[key];
 
 // Customer feedback questions (page 5 of the bank report).
 export const DECLARATION_QUESTIONS = [
-  { key: 'noMoney', title: 'No monetary solicitation', text: 'The field executive did not demand or collect any unauthorised money or fees.' },
-  { key: 'noPhotos', title: 'No unauthorised photo requests', text: 'The field executive did not request personal photographs through a mobile device or any unauthorised means.' },
-  { key: 'noLoanPush', title: 'No third-party loan facilitation', text: 'The field executive did not pressure or influence me to take loans from other financial institutions.' },
-  { key: 'professional', title: 'Professional conduct', text: 'The field executive was polite and professional during the visit.' },
+  { key: 'noMoney', title: 'No monetary solicitation', text: 'The field executive did not demand or collect any unauthorised money or fees.', titleKn: 'ಹಣದ ಬೇಡಿಕೆ ಇಲ್ಲ', textKn: 'ಕಾರ್ಯನಿರ್ವಾಹಕರು ಯಾವುದೇ ಅನಧಿಕೃತ ಹಣ ಅಥವಾ ಶುಲ್ಕವನ್ನು ಕೇಳಿಲ್ಲ ಅಥವಾ ಸಂಗ್ರಹಿಸಿಲ್ಲ.' },
+  { key: 'noPhotos', title: 'No unauthorised photo requests', text: 'The field executive did not request personal photographs through a mobile device or any unauthorised means.', titleKn: 'ಫೋಟೋಗಳ ಬೇಡಿಕೆ ಇಲ್ಲ', textKn: 'ಮೊಬೈಲ್ ಮೂಲಕ ಯಾವುದೇ ವೈಯಕ್ತಿಕ ಫೋಟೋಗಳನ್ನು ಕೇಳಿಲ್ಲ ಅಥವಾ ಸಂಗ್ರಹಿಸಿಲ್ಲ.' },
+  { key: 'noLoanPush', title: 'No third-party loan facilitation', text: 'The field executive did not pressure or influence me to take loans from other financial institutions.', titleKn: 'ಪರ್ಯಾಯ ಸಾಲದ ಪ್ರೇರಣೆ ಇಲ್ಲ', textKn: 'ಬೇರೆ ಹಣಕಾಸು ಸಂಸ್ಥೆಗಳಿಂದ ಸಾಲ ಪಡೆಯುವಂತೆ ಒತ್ತಡ ಹೇರಿಲ್ಲ ಅಥವಾ ಪ್ರೇರೇಪಿಸಿಲ್ಲ.' },
+  { key: 'professional', title: 'Professional conduct', text: 'The field executive was polite and professional during the visit.', titleKn: 'ವೃತ್ತಿಪರ ನಡವಳಿಕೆ', textKn: 'ಕಾರ್ಯನಿರ್ವಾಹಕರ ನಡವಳಿಕೆಗೆ ಸಂಬಂಧಿಸಿದ ಗ್ರಾಹಕರ ಅಭಿಪ್ರಾಯವನ್ನು ದಾಖಲಿಸಲಾಗಿದೆ.' },
 ];
+
+// Kannada text of the customer declaration (client's bilingual format)
+export const DECLARATION_KN = {
+  heading: 'ಗ್ರಾಹಕರ ದೃಢೀಕರಣ',
+  intro: 'Reliable Services – Investigation Agency ವತಿಯಿಂದ ನಡೆಸಿದ ಕ್ಷೇತ್ರ ಪರಿಶೀಲನೆಯ ಸಂದರ್ಭದಲ್ಲಿ ಗ್ರಾಹಕರು / ಭೇಟಿಯಾದ ವ್ಯಕ್ತಿಯು ಕೆಳಗಿನ ಅಂಶಗಳನ್ನು ದೃಢೀಕರಿಸಿದ್ದಾರೆ:',
+  closing: 'ಮೇಲಿನ ಮಾಹಿತಿಯು ಭೇಟಿಯ ಸಂದರ್ಭದಲ್ಲಿ ಗ್ರಾಹಕರು / ಭೇಟಿಯಾದ ವ್ಯಕ್ತಿಯು ನೀಡಿದ ದೃಢೀಕರಣವನ್ನು ಮಾತ್ರ ಆಧರಿಸಿದೆ.',
+  acknowledgment: 'ಮೇಲಿನ ಮಾಹಿತಿಯನ್ನು ನಾನು ನೀಡಿದ ವಿವರಗಳ ಆಧಾರದ ಮೇಲೆ ದಾಖಲಿಸಲಾಗಿದೆ ಎಂದು ದೃಢೀಕರಿಸುತ್ತೇನೆ.',
+  notConfirmed: 'ದೃಢೀಕರಿಸಲಾಗಿಲ್ಲ',
+  confirmed: 'ದೃಢೀಕರಿಸಲಾಗಿದೆ',
+  nocTitle: 'ನಿರಾಕ್ಷೇಪಣಾ ಪತ್ರ', // No Objection Certificate
+};
 
 export const QA_PARAMS = [
   { key: 'executiveInfo', label: 'Executive information', note: 'Mandatory fields reviewed' },

@@ -1,0 +1,11 @@
+/* ===== Round 6 (11 Nov 2026) — paste at the end of src/index.css ===== */
+/* Case report: big photo evidence (2 per row, up to 6 on one A4 page) */
+.r-evidence { gap: 8px; }
+.r-photos-big { grid-template-columns: 1fr 1fr; gap: 5mm 6mm; }
+.r-photos-big .r-photo { border: 1px solid #f2d9da; break-inside: avoid; }
+.r-photos-big .r-photo-head { padding: 6px 10px; font-size: 10.5px; }
+.r-photos-big .r-photo-body { height: 56mm; background: #2b2a2a; color: var(--yellow); }
+.r-photos-big .r-photo-body img { object-fit: contain; background: #2b2a2a; }
+.r-photos-big.few .r-photo-body { height: 100mm; }
+.r-photos-big .r-photo-foot { padding: 5px 10px; font-size: 10px; }
+.r-photos-big.mid .r-photo-body { height: 84mm; }

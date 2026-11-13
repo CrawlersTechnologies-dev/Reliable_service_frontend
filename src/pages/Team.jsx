@@ -1,18 +1,20 @@
 import { useMemo, useState } from 'react';
 import * as api from '../api';
 import { useAuth, useData, useNow, useToast } from '../context/AppContext';
-import { Avatar, Empty, Field, Modal, PageHeader, Pill } from '../components/ui';
+import { Avatar, Empty, Field, Modal, PageHeader, Pill, Segmented } from '../components/ui';
+import { Link } from 'react-router-dom';
 import Icon from '../components/Icon';
-import { USER_STATUS } from '../config/verification';
+import { AGENCY, BLOOD_GROUPS, EXEC_STATUS, EXEC_TYPES, PINCODE_RE, USER_STATUS } from '../config/verification';
+import { isBirthday } from '../utils/birthday';
 import { caseTat } from '../utils/tat';
 import { copyText, fmtDate, todayISO } from '../utils/format';
 
 const COPY = {
-  OL: { title: 'Operational leads', single: 'operational lead', designation: 'Operations', empty: { employeeId: '', name: '', mobile: '', email: '', doj: '', status: 'Active', photo: '' } },
-  EXECUTIVE: { title: 'Field executives', single: 'field executive', designation: 'Field Executive', empty: { employeeId: '', name: '', mobile: '', email: '', altMobile: '', address: '', location: '', doj: '', status: 'Active', photo: '' } },
+  OL: { title: 'Operational leads', single: 'operational lead', designation: 'Operations', empty: { employeeId: '', name: '', mobile: '', email: '', doj: '', dob: '', pincode: '', bloodGroup: '', salary: '', relievedOn: '', status: 'Active', photo: '' } },
+  EXECUTIVE: { title: 'Field executives', single: 'field executive', designation: 'Field Executive', empty: { employeeId: '', name: '', mobile: '', email: '', altMobile: '', address: '', location: '', doj: '', dob: '', pincode: '', bloodGroup: '', execType: 'FIELD_OFFICER', companyName: 'Reliable Services', reportingManagerId: '', status: 'Active', photo: '' } },
 };
 
-const STATUS_TONE = { Active: 'green', Inactive: 'slate', Suspended: 'red' };
+const STATUS_TONE = { Active: 'green', Inactive: 'slate', Suspended: 'red', Deleted: 'red' };
 
 // Shrinks the uploaded photo so it stays light (backend will store the original).
 function readPhoto(file) {
@@ -60,8 +62,11 @@ export default function Team({ role }) {
     return m;
   }, [data.cases, now]);
 
+  const isExec = role === 'EXECUTIVE';
+  const statusOptions = isExec ? EXEC_STATUS : USER_STATUS;
+  // field executives: deleted ones are hidden unless "Deleted" is chosen in the filter
   const list = people.filter(
-    (p) => (!status || p.status === status) && `${p.name} ${p.employeeId} ${p.mobile} ${p.location || ''}`.toLowerCase().includes(q.toLowerCase()),
+    (p) => (status ? p.status === status : !(isExec && p.status === 'Deleted')) && `${p.name} ${p.employeeId} ${p.mobile} ${p.location || ''}`.toLowerCase().includes(q.toLowerCase()),
   );
 
   const open = (p) => {
@@ -72,9 +77,17 @@ export default function Team({ role }) {
   };
 
   async function resetPassword() {
-    if (!window.confirm(`Reset the password for ${editing.name}? Their current password will stop working.`)) return;
+    const typed = window.prompt(
+      `New password for ${editing.name}.\n\nType a password (at least 8 characters), or leave it empty to generate one. Their current password will stop working.`,
+      '',
+    );
+    if (typed === null) return; // cancelled
+    if (typed.trim() && typed.trim().length < 8) {
+      toast('Password must be at least 8 characters', 'error');
+      return;
+    }
     try {
-      const password = await api.users.resetPassword(editing.id);
+      const password = await api.users.resetPassword(editing.id, typed.trim());
       setEditing(null);
       setCreds({ name: editing.name, email: editing.email, password });
     } catch (x) {
@@ -90,6 +103,9 @@ export default function Team({ role }) {
     if (!/^\d{10}$/.test(form.mobile)) e.mobile = '10-digit mobile number';
     if (!/^\S+@\S+\.\S+$/.test(form.email)) e.email = 'Valid email ID';
     if (!form.doj) e.doj = 'Required';
+    if (!form.dob) e.dob = 'Required';
+    else if (form.dob >= todayISO()) e.dob = 'Must be in the past';
+    if (!PINCODE_RE.test(form.pincode)) e.pincode = '6-digit PIN code';
     if (role === 'EXECUTIVE') {
       if (form.altMobile && !/^\d{10}$/.test(form.altMobile)) e.altMobile = '10-digit number';
       if (!form.address.trim()) e.address = 'Required';
@@ -102,13 +118,20 @@ export default function Team({ role }) {
   async function save(ev) {
     ev.preventDefault();
     if (!validate()) return;
+    // field executives have only Active / Delete — older Inactive / Suspended become Active when saved
+    const payload = isExec && form.status !== 'Deleted' && form.status !== 'Active' ? { ...form, status: 'Active' } : form;
+    if (isExec && editing.id && form.status === 'Deleted' && editing.status !== 'Deleted') {
+      const open = load[editing.id]?.open || 0;
+      const msg = `Delete ${editing.name}? They will not be able to log in to the app.${open ? `\n\n${open} open visit(s) are still assigned to them — transfer them to another executive.` : ''}`;
+      if (!window.confirm(msg)) return;
+    }
     setSaving(true);
     try {
       if (editing.id) {
-        await api.users.update(editing.id, form);
-        toast('Details updated');
+        await api.users.update(editing.id, payload);
+        toast(form.status === 'Deleted' && editing.status !== 'Deleted' ? `${editing.name} deleted` : 'Details updated');
       } else {
-        const { user, tempPassword } = await api.users.create({ ...form, role });
+        const { user, tempPassword } = await api.users.create({ ...payload, role });
         setCreds({ name: user.name, email: user.email, password: tempPassword });
       }
       await data.refresh();
@@ -140,8 +163,8 @@ export default function Team({ role }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, ID, mobile" />
         </div>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
-          <option value="">All statuses</option>
-          {USER_STATUS.map((s) => <option key={s}>{s}</option>)}
+          <option value="">{isExec ? 'All (not deleted)' : 'All statuses'}</option>
+          {statusOptions.map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
 
@@ -171,8 +194,15 @@ export default function Team({ role }) {
                       <div className="person-cell">
                         <Avatar name={p.name} photo={p.photo} size={34} />
                         <div>
-                          <strong>{p.name}</strong>
-                          <div className="muted small">{p.designation}</div>
+                          <strong>
+                            {p.name}
+                            {isBirthday(p.dob) && (
+                              <span className="bday-tag" title="Birthday today">
+                                <Icon name="cake" size={13} /> Birthday
+                              </span>
+                            )}
+                          </strong>
+                          <div className="muted small">{p.designation}{p.pincode ? ` · PIN ${p.pincode}` : ''}</div>
                         </div>
                       </div>
                     </td>
@@ -192,7 +222,14 @@ export default function Team({ role }) {
                     )}
                     <td><Pill tone={STATUS_TONE[p.status]}>{p.status}</Pill></td>
                     {isAdmin && (
-                      <td className="num">
+                      <td className="num nowrap">
+                        <Link
+                          className="btn btn-ghost btn-xs"
+                          to={`/team/${role === 'OL' ? 'leads' : 'executives'}/${p.id}/experience-letter`}
+                          title="Experience letter"
+                        >
+                          <Icon name="report" size={13} /> Letter
+                        </Link>
                         <button className="btn btn-ghost btn-xs" onClick={() => open(p)}>
                           <Icon name="edit" size={13} /> Edit
                         </button>
@@ -267,19 +304,68 @@ export default function Team({ role }) {
               <Field label="Complete address" required className="span-2" error={errors.address}>
                 <textarea rows={2} value={form.address} onChange={set('address')} />
               </Field>
+              <Field label="Company name" hint="Printed on the field officer review">
+                <input value={form.companyName} onChange={set('companyName')} placeholder="Reliable Services" />
+              </Field>
+              <Field label="Reporting manager" hint="Fixed for all field executives">
+                <input value={`${AGENCY.reviewer} (${AGENCY.reviewerTitle})`} disabled />
+              </Field>
+              <Field label="Works as" required className="span-2">
+                <Segmented value={form.execType || 'FIELD_OFFICER'} onChange={(v) => setForm((f) => ({ ...f, execType: v }))} options={EXEC_TYPES.map((t) => ({ value: t.key, label: t.label }))} />
+              </Field>
             </>
           )}
           <Field label="Designation">
-            <input value={cfg.designation} disabled />
+            <input value={role === 'EXECUTIVE' ? (form.execType === 'SAMPLER' ? 'Sampler' : 'Field Executive') : cfg.designation} disabled />
           </Field>
+          <Field label="Blood group" hint="Printed on the ID card">
+            <select value={form.bloodGroup || ''} onChange={set('bloodGroup')}>
+              <option value="">Not given</option>
+              {BLOOD_GROUPS.map((b) => <option key={b}>{b}</option>)}
+            </select>
+          </Field>
+          {role === 'OL' && (
+            <>
+              <Field label="Salary offered (₹ / month)" hint="Visible to the admin only" error={errors.salary}>
+                <input inputMode="numeric" value={form.salary ?? ''} onChange={(e) => setForm((f) => ({ ...f, salary: e.target.value.replace(/\D/g, '') }))} placeholder="e.g. 30000" />
+              </Field>
+              <Field label="Relieving date" hint="Only when the person leaves — used on the experience letter">
+                <input type="date" value={form.relievedOn || ''} onChange={set('relievedOn')} />
+              </Field>
+            </>
+          )}
           <Field label="Date of joining" required error={errors.doj}>
             <input type="date" value={form.doj} onChange={set('doj')} />
           </Field>
-          <Field label="Status">
-            <select value={form.status} onChange={set('status')}>
-              {USER_STATUS.map((s) => <option key={s}>{s}</option>)}
-            </select>
+          <Field label="Date of birth" required error={errors.dob} hint="Used for birthday wishes">
+            <input type="date" value={form.dob} max={todayISO()} onChange={set('dob')} />
           </Field>
+          <Field
+            label={role === 'EXECUTIVE' ? 'Base PIN code' : 'PIN code'}
+            required
+            error={errors.pincode}
+            hint={role === 'EXECUTIVE' ? 'Used to suggest the nearest executive for new cases' : undefined}
+          >
+            <input inputMode="numeric" maxLength={6} value={form.pincode} onChange={set('pincode')} placeholder="580021" />
+          </Field>
+          {isExec ? (
+            <Field label="Status" hint={form.status === 'Deleted' ? 'Deleted executives cannot log in and are hidden from the list.' : undefined}>
+              <Segmented
+                value={form.status === 'Deleted' ? 'Deleted' : 'Active'}
+                onChange={(v) => setForm((f) => ({ ...f, status: v }))}
+                options={[
+                  { value: 'Active', label: 'Active' },
+                  { value: 'Deleted', label: 'Delete' },
+                ]}
+              />
+            </Field>
+          ) : (
+            <Field label="Status">
+              <select value={form.status} onChange={set('status')}>
+                {USER_STATUS.filter((s) => s !== 'Deleted').map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </Field>
+          )}
         </form>
       </Modal>
 
@@ -292,12 +378,15 @@ export default function Team({ role }) {
         {creds && (
           <div className="created">
             <p>
-              Share these with <strong>{creds.name}</strong>. The password is shown only once — they should change it after signing in.
+              Share these with <strong>{creds.name}</strong>. The password is shown only once.{' '}
+              {role === 'EXECUTIVE'
+                ? 'Field executives cannot change it themselves — only the admin can set a new one (Edit → Reset password).'
+                : 'They should change it after signing in.'}
             </p>
             <div className="feedback-box">
               <span className="field-label">Email ID</span>
               <div className="copy-row"><input readOnly value={creds.email} onFocus={(e) => e.target.select()} /></div>
-              <span className="field-label">Temporary password</span>
+              <span className="field-label">{role === 'EXECUTIVE' ? 'Password' : 'Temporary password'}</span>
               <div className="copy-row">
                 <input readOnly value={creds.password} onFocus={(e) => e.target.select()} />
                 <button className="btn btn-dark btn-sm" onClick={async () => toast((await copyText(`Email: ${creds.email}\nPassword: ${creds.password}`)) ? 'Copied' : 'Could not copy')}>

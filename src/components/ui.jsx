@@ -3,22 +3,15 @@ import Icon from './Icon';
 import { typeOf } from '../config/verification';
 import { caseTat, fmtDuration } from '../utils/tat';
 import { initials } from '../utils/format';
+import logoFull from '../assets/logo.png';
+import logoLight from '../assets/logo-light.png';
+import logoMark from '../assets/logo-mark.png';
 
+// Company logo (image). light = white "RELIABLE" for dark backgrounds; compact = the round mark only.
 export function Logo({ compact = false, light = false }) {
   return (
-    <div className={`logo ${light ? 'logo-light' : ''}`}>
-      <svg viewBox="0 0 48 48" className="logo-mark" aria-hidden="true">
-        <path d="M24 6a18 18 0 1 0 18 18" fill="none" stroke="#D0151F" strokeWidth="6" strokeLinecap="round" />
-        <path d="M24 13a11 11 0 1 0 11 11" fill="none" stroke="#8E0E16" strokeWidth="3" strokeLinecap="round" />
-        <path d="M34 6.5h7.5V14" fill="none" stroke="#F2B705" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="24" cy="24" r="4" fill="#F2B705" />
-      </svg>
-      {!compact && (
-        <div className="logo-text">
-          <strong>RELIABLE</strong>
-          <span>SERVICES</span>
-        </div>
-      )}
+    <div className={`logo ${light ? 'logo-light' : ''} ${compact ? 'logo-compact' : ''}`}>
+      <img className="logo-img" src={compact ? logoMark : light ? logoLight : logoFull} alt="Reliable Services" draggable="false" />
     </div>
   );
 }

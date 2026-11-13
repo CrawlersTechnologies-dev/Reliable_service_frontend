@@ -37,7 +37,7 @@ export default function Feedback() {
   return (
     <div className="public">
       <header className="public-head">
-        <Logo />
+        <Logo light />
       </header>
       <main className="public-card">
         {error ? (
@@ -77,12 +77,13 @@ export default function Feedback() {
             {DECLARATION_QUESTIONS.map((q) => (
               <div className="fb-q" key={q.key}>
                 <p>{q.text}</p>
+                <p className="kn">{q.textKn}</p>
                 <div className="yesno">
                   <button type="button" className={form[q.key] === true ? 'on yes' : ''} onClick={() => setForm({ ...form, [q.key]: true })}>
-                    Yes, correct
+                    Yes, correct · ಹೌದು
                   </button>
                   <button type="button" className={form[q.key] === false ? 'on no' : ''} onClick={() => setForm({ ...form, [q.key]: false })}>
-                    No
+                    No · ಇಲ್ಲ
                   </button>
                 </div>
               </div>

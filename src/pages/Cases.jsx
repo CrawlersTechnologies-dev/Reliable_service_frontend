@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useData, useNow } from '../context/AppContext';
+import { useAuth, useData, useNow } from '../context/AppContext';
 import { Empty, PageHeader, Pill, Segmented, TatBadge, TypeChip } from '../components/ui';
 import Icon from '../components/Icon';
 import { OUTCOMES, TAT_TYPES, TYPE_LIST } from '../config/verification';
 import { CASE_STATUS, caseStatus, caseTat } from '../utils/tat';
 import { fmtDate, fmtTime } from '../utils/format';
+import { downloadMis } from '../utils/mis';
 
 const TABS = [
   { value: 'all', label: 'All' },
@@ -24,6 +25,7 @@ const matchTab = (tab, x) =>
 
 export default function Cases() {
   const { cases, banks, bankById, executives, execById } = useData();
+  const { isAdmin } = useAuth();
   const now = useNow();
   const location = useLocation();
   const navigate = useNavigate();
@@ -39,7 +41,7 @@ export default function Cases() {
     return cases
       .map((c) => ({ c, tat: caseTat(c, now), status: caseStatus(c) }))
       .filter(({ c }) => {
-        if (q && !`${c.caseNo} ${c.customerName} ${c.product}`.toLowerCase().includes(q)) return false;
+        if (q && !`${c.caseNo} ${c.customerName} ${(c.otherNames || []).join(" ")} ${c.product} ${c.bankerCaseId || ""} ${c.pan || ""} ${c.contact}`.toLowerCase().includes(q)) return false;
         if (f.bank && c.bankId !== f.bank) return false;
         if (f.type && !c.legs.some((l) => l.type === f.type)) return false;
         if (f.exec && !c.legs.some((l) => l.executiveId === f.exec)) return false;
@@ -62,19 +64,8 @@ export default function Cases() {
       return b.c.createdAt.localeCompare(a.c.createdAt);
     });
 
-  function exportCsv() {
-    const head = ['Case ID', 'Created', 'Bank', 'Customer', 'Product', 'Verifications', 'Executives', 'TAT', 'TAT status', 'Case status', 'Outcome'];
-    const lines = visible.map(({ c, tat, status }) => [
-      c.caseNo, new Date(c.createdAt).toLocaleString('en-IN'), bankById[c.bankId]?.name, c.customerName, c.product,
-      c.legs.map((l) => l.type).join(' + '), c.legs.map((l) => execById[l.executiveId]?.name).join(' + '),
-      c.tatType, tat.state, CASE_STATUS[status].label, c.outcome || '',
-    ]);
-    const csv = [head, ...lines].map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `cases-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-  }
+  // MIS of the cases shown with the current filters / tab
+  const exportCsv = () => downloadMis(visible.map((x) => x.c), bankById, execById, 'filtered');
 
   return (
     <div className="page">
@@ -83,9 +74,14 @@ export default function Cases() {
         subtitle="In process = within TAT · Pending = crossed TAT (red, counting extra time)"
         actions={
           <>
-            <button className="btn btn-ghost" onClick={exportCsv}>
-              <Icon name="download" /> Export CSV
+            <button className="btn btn-ghost" onClick={exportCsv} title="Excel file with all case details for the cases listed below">
+              <Icon name="download" /> MIS ({visible.length})
             </button>
+            {isAdmin && (
+              <button className="btn btn-dark" onClick={() => downloadMis(cases, bankById, execById, 'all')} title="Excel file with every case and every detail">
+                <Icon name="download" /> Master MIS
+              </button>
+            )}
             <Link className="btn btn-primary" to="/cases/new">
               <Icon name="plus" /> New case
             </Link>
@@ -100,7 +96,7 @@ export default function Cases() {
       <div className="filters card">
         <div className="input-icon search">
           <Icon name="search" size={16} />
-          <input value={f.q} onChange={set('q')} placeholder="Search case ID, customer, product" />
+          <input value={f.q} onChange={set('q')} placeholder="Search case ID, banker case ID, customer, PAN, mobile" />
         </div>
         <select value={f.bank} onChange={set('bank')} aria-label="Bank">
           <option value="">All banks</option>

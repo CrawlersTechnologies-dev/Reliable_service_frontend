@@ -2,9 +2,13 @@ import { TAT_TYPES } from '../config/verification';
 
 const HOUR = 3600 * 1000;
 
+// TAT hours of a case — each holiday added by Admin / OL gives 24 h more
+export function tatHoursOf(c) {
+  return (TAT_TYPES[c.tatType]?.hours ?? 8) + (c.holidays?.length || 0) * 24;
+}
+
 export function deadlineOf(c) {
-  const hours = TAT_TYPES[c.tatType]?.hours ?? 8;
-  return new Date(c.createdAt).getTime() + hours * HOUR;
+  return new Date(c.createdAt).getTime() + tatHoursOf(c) * HOUR;
 }
 
 // TAT clock stops when the executive(s) submit. stopAt = submission time.
@@ -15,7 +19,7 @@ function tatState(c, stopAt, now) {
   let state;
   if (stopAt) state = diff >= 0 ? 'MET' : 'MISSED';
   else state = diff >= 0 ? 'IN_TAT' : 'OUT_OF_TAT';
-  const hours = TAT_TYPES[c.tatType]?.hours ?? 8;
+  const hours = tatHoursOf(c);
   const elapsed = ref - new Date(c.createdAt).getTime();
   return { state, diff, deadline, overdue: diff < 0 ? -diff : 0, progress: Math.min(1, Math.max(0, elapsed / (hours * HOUR))) };
 }

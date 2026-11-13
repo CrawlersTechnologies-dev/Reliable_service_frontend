@@ -1,0 +1,48 @@
+
+/* ===== Round 5 (2 Nov 2026) ===== */
+/* Discussion alerts */
+.chat-toast { position: fixed; right: 20px; bottom: 20px; z-index: 90; width: 340px; max-width: calc(100vw - 32px); display: flex; gap: 12px; padding: 14px; background: #fff; border-radius: 14px; border: 1px solid var(--line); border-left: 5px solid var(--yellow); box-shadow: 0 16px 40px rgba(0,0,0,0.22); animation: chatIn 0.25s ease-out; }
+.chat-toast-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--red); color: #fff; display: grid; place-items: center; flex: none; }
+.chat-toast-body { min-width: 0; flex: 1; }
+.chat-toast-body strong { font-size: 13.5px; }
+.chat-toast-body strong em { font-style: normal; font-size: 10.5px; color: var(--muted); background: var(--line-2); padding: 0 5px; border-radius: 4px; margin-left: 4px; }
+.chat-toast-body p { margin: 3px 0 8px; font-size: 13px; color: #444; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chat-toast-actions { display: flex; gap: 6px; }
+.chat-remind-wrap { position: fixed; inset: 0; z-index: 110; background: rgba(15, 10, 10, 0.55); display: grid; place-items: center; padding: 16px; animation: chatFade 0.2s ease-out; }
+.chat-remind { width: 420px; max-width: 100%; background: #fff; border-radius: 18px; padding: 26px 24px 20px; text-align: center; border-top: 6px solid var(--red); box-shadow: 0 30px 80px rgba(0,0,0,0.35); animation: chatPop 0.3s cubic-bezier(.2,1.4,.4,1); }
+.chat-remind-bell { position: relative; width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 50%; background: var(--yellow); color: var(--black); display: grid; place-items: center; animation: chatRing 1.2s ease-in-out 2; }
+.chat-remind-bell span { position: absolute; top: -4px; right: -4px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; background: var(--red); color: #fff; font-weight: 800; font-size: 12.5px; display: grid; place-items: center; border: 2px solid #fff; }
+.chat-remind h3 { margin: 0 0 6px; font-size: 19px; font-weight: 800; }
+.chat-remind p { margin: 0 0 12px; color: #4b5563; font-size: 14px; line-height: 1.5; }
+.chat-remind-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.notify-nudge { position: fixed; right: 20px; bottom: 20px; z-index: 80; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--black); color: #fff; border-radius: 12px; font-size: 13px; box-shadow: 0 12px 30px rgba(0,0,0,0.25); max-width: calc(100vw - 32px); flex-wrap: wrap; }
+.notify-nudge .btn-ghost { color: #fff; border-color: rgba(255,255,255,0.25); background: transparent; }
+@keyframes chatIn { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes chatFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes chatPop { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes chatRing { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-14deg); } 40% { transform: rotate(12deg); } 60% { transform: rotate(-8deg); } 80% { transform: rotate(5deg); } }
+/* Dedupe check */
+.dedupe { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px dashed var(--line); border-radius: 12px; background: #fcfbf9; }
+.dedupe-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dedupe-result { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+.dedupe-result strong { display: block; font-size: 14px; }
+.dedupe-result.ok { background: #e8f6ee; color: #14532d; border: 1px solid #b7e2c6; }
+.dedupe-result.hit { flex-direction: column; background: #fdecec; color: #7f1d1d; border: 1px solid #f3c1c4; }
+.dedupe-hit-head { display: flex; gap: 10px; align-items: flex-start; }
+.dedupe-table { background: #fff; border-radius: 8px; font-size: 12.5px; }
+.dedupe-table th, .dedupe-table td { padding: 7px 9px; }
+/* Case report: seal + signature under the final status */
+.r-auth-sign { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-top: 18px; padding-top: 12px; border-top: 1px dashed #e5d9d9; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.r-auth-sign > div { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.r-auth-sign strong { font-size: 15px; color: var(--red-800); }
+.dedupe-table td:nth-child(1), .dedupe-table td:nth-child(2) { white-space: nowrap; }
+/* New company logo (image) */
+.logo-img { display: block; height: 44px; width: auto; max-width: 100%; user-select: none; }
+.logo-compact .logo-img { height: 40px; }
+.sidebar-brand .logo-img { height: 54px; }
+.topbar .logo-img { height: 34px; }
+.r-cover .logo-img { height: 100px; }
+.noc-head .logo-img, .letter-head .logo-img { height: 52px; }
+.public-head .logo-img { height: 46px; }
+.login-brand .logo-img, .login .logo-img { height: 60px; }
+.login-art .logo-img { height: 64px; }
