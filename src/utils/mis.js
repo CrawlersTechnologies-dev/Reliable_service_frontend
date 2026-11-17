@@ -1,5 +1,6 @@
 // Master MIS — every case with all its details, downloaded as an Excel (.xlsx) file.
-import { OUTCOMES, VISIT_RESULTS, typeOf } from '../config/verification';
+import { OUTCOMES, VISIT_RESULTS, reportLabel, typeOf } from '../config/verification';
+import { buildRemarks } from './remarks';
 import { caseStatus, caseSubmittedAt, caseTat, CASE_STATUS, fmtDuration } from './tat';
 import { downloadXlsx } from './xlsx';
 
@@ -28,7 +29,7 @@ export const MIS_HEADER = [
   'PAN', 'Dedupe check', 'Customer profile', 'DSA / DST', 'DSA / DST name',
   'Verification types', 'Field executives', 'Location', 'Sub-location', 'KMS', 'Visit result', 'TAT type', 'Deadline', 'Holiday days',
   'Field completed', 'TAT status', 'Delay', 'Delay reason', 'Re-work count', 'Case status', 'Final status',
-  'Final status by', 'Final status on', 'QA remarks', 'Customer rating',
+  'Final status by', 'Final status on', 'Combined remarks', 'Customer rating',
 ];
 
 // Location = "From" place, Sub-location = "To" place, KMS = distance (total of all visits)
@@ -36,6 +37,20 @@ const places = (c, key) => [...new Set(c.legs.filter((l) => !l.internal).map((l)
 function kms(c) {
   const list = c.legs.filter((l) => !l.internal).map((l) => l.km).filter((k) => k !== null && k !== undefined && k !== '' && !Number.isNaN(Number(k)));
   return list.length ? Math.round(list.reduce((t, k) => t + Number(k), 0) * 10) / 10 : '';
+}
+// the same remarks as the report's "Overall combined remarks" page, one block per verification
+function combinedRemarks(c) {
+  return c.legs
+    .map((l) => {
+      const name = reportLabel(typeOf(l.type)).toUpperCase();
+      if (l.status !== 'SUBMITTED') return `${name}: Pending`;
+      if (['UNTRACEABLE', 'REFUSED'].includes(l.visitResult)) {
+        return `${name}: ${VISIT_RESULTS.find((r) => r.key === l.visitResult)?.label || l.visitResult} — ${l.nonVisitReason || ''}`;
+      }
+      const lines = buildRemarks(l.type, l.findings || {}, l).map(([k, v]) => `${k}: ${v}`);
+      return `${name}\n${lines.join('\n')}`;
+    })
+    .join('\n\n');
 }
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? '' : Number(v));
 
@@ -81,7 +96,7 @@ export function misRows(cases, bankById, execById) {
       OUTCOMES.find((o) => o.key === c.outcome)?.label || '',
       c.outcomeBy?.name || '',
       d(c.outcomeAt),
-      c.qaRemarks,
+      combinedRemarks(c),
       num(c.feedback?.rating),
     ];
   });

@@ -112,6 +112,7 @@ export default function NewCase() {
               ),
             }),
             executiveId: internal ? '' : l.executiveId,
+            documentNo: typeOf(l.type).isDocument && !internal ? docNo.trim() : '',
             documentName: l.documentName === 'Other' ? documentOther.trim() : l.documentName,
             contact: internal ? '' : digits(l.contact) || digits(form.contact),
             km: l.km === '' ? null : Number(l.km),
@@ -422,15 +423,15 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
               <input value={leg.docNo} onChange={(e) => onChange({ docNo: e.target.value })} placeholder="e.g. KH/DVG/2024/1187" />
             </Field>
           )}
-          <Field label="Document status">
+          <Field label="Status">
             <select value={leg.docStatus} onChange={(e) => onChange({ docStatus: e.target.value })}>
               <option value="">Not checked yet</option>
-              {['Genuine', 'Fake', 'Could not verify'].map((d) => (
+              {['Positive', 'Fake', 'Refused'].map((d) => (
                 <option key={d}>{d}</option>
               ))}
             </select>
           </Field>
-          <Field label="Verification details" className="span-2" hint="Printed on the bank report. Leave empty to fill in later.">
+          <Field label="Remarks" className="span-2" hint="Printed on the bank report exactly as written, under Document check. Leave empty to fill in later.">
             <textarea rows={3} value={leg.docDetails} onChange={(e) => onChange({ docDetails: e.target.value })} placeholder="e.g. Checked with the Taluk office register — owner name, survey no. and issue date match." />
           </Field>
           <Field label={t.placeLabel} className="span-2">
@@ -470,13 +471,15 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
                   ))}
                 </select>
               </Field>
-              {leg.documentName === 'Other' ? (
+              {leg.documentName === 'Other' && (
                 <Field label="Specify document" required>
                   <input value={leg.documentOther} onChange={(e) => onChange({ documentOther: e.target.value })} />
                 </Field>
-              ) : (
-                <span />
               )}
+              <Field label="Document No." hint="Entered by operations — the executive does not fill this in.">
+                <input value={leg.docNo} onChange={(e) => onChange({ docNo: e.target.value })} placeholder="e.g. RTC/HBL/2025/4410" />
+              </Field>
+              {leg.documentName !== 'Other' && <span />}
               {attachments('Document copies for the executive (photos / PDF, optional)', 0)}
             </>
           )}

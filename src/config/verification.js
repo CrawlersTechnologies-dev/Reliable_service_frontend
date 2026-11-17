@@ -197,27 +197,29 @@ export const VERIFICATION_TYPES = {
     isDocument: true, // allocated to a field executive, who verifies it at the issuing office
     hint: 'Field executive verifies the document at the issuing office',
     placeLabel: 'Issuing authority / office',
+    // Document No. is entered by operations (on the allocation), not by the executive
     fields: [
-      { key: 'documentNo', label: 'Document No.', type: 'text' },
-      { key: 'verifiedWith', label: 'Verified with (official name & designation)', type: 'text' },
-      { key: 'details', label: 'Verification details', type: 'textarea' },
-      { key: 'documentStatus', label: 'Document status', type: 'select', options: ['Genuine', 'Fake', 'Could not verify'] },
+      { key: 'metPerson', label: 'Met person name', type: 'text' },
+      { key: 'metPersonDesignation', label: 'Designation', type: 'text' },
+      { key: 'documentStatus', label: 'Status', type: 'select', options: ['Positive', 'Fake', 'Refused'] },
+      { key: 'feRemarks', label: 'FE remarks', type: 'textarea' },
     ],
     photos: ['Issuing office', 'Executive + office selfie', 'Document / record seen', 'Office name board', 'Extra'],
   },
   INTERNAL_DOCUMENT: {
     key: 'INTERNAL_DOCUMENT',
     label: 'Internal check document',
+    reportLabel: 'Document check', // printed on the bank report the same as a field document check
     code: 'IC',
     tone: 'slate',
     internal: true, // checked in the office by Admin / OL — no field visit
     isDocument: true,
-    hint: 'Checked in the office by Admin / OL — document type, number and details',
+    hint: 'Checked in the office by Admin / OL — document type, number and remarks',
     placeLabel: 'Issuing authority / office',
     fields: [
       { key: 'documentNo', label: 'Document No.', type: 'text' },
-      { key: 'details', label: 'Verification details', type: 'textarea' },
-      { key: 'documentStatus', label: 'Document status', type: 'select', options: ['Genuine', 'Fake', 'Could not verify'] },
+      { key: 'documentStatus', label: 'Status', type: 'select', options: ['Positive', 'Fake', 'Refused'] },
+      { key: 'details', label: 'Remarks (printed as written)', type: 'textarea' },
     ],
     photos: [],
   },
@@ -306,3 +308,6 @@ export const QA_PARAMS = [
   { key: 'rating', label: 'Customer rating', note: 'Rating reviewed' },
 ];
 
+
+/** Name printed on the bank report (an internal check document prints as "Document check"). */
+export const reportLabel = (t) => t?.reportLabel || t?.label || '';

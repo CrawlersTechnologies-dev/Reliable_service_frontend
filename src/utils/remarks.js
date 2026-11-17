@@ -18,6 +18,8 @@ export function buildRemarks(type, f = {}, leg = {}) {
   // the filled answers as a table plus the remarks they typed.
   // When every answer was filled in, the full write-up is used as for a field visit.
   const extra = leg.manualRemarks ? [['Remarks', leg.manualRemarks]] : [];
+  // internal check document: the remarks typed by operations are printed as written
+  if (type === 'INTERNAL_DOCUMENT') return [...typeRemarks(type, f, leg), ...extra];
   if (leg.manual) {
     const t = VERIFICATION_TYPES[type];
     const complete = t?.fields.every((fd) => (fd.showIf && !fd.showIf(f)) || (f[fd.key] !== undefined && f[fd.key] !== ''));
@@ -64,22 +66,21 @@ function typeRemarks(type, f = {}, leg = {}) {
         ['Valuation', `Government value ₹${v(f.govtValue)}; private/market value ₹${v(f.privateValue)}.`],
         ['Neighbour check', `${v(f.neighbourCheck, 'Not recorded')}. Nearest landmark is ${v(f.landmark)}.`],
       ];
-    case 'DOCUMENT':
+    // Field and internal document checks print the same way, under "Document check"
+    case 'DOCUMENT': {
+      const docNo = leg.documentNo || f.documentNo;
+      const doc = `${v(leg.documentName, 'Document')}${docNo ? ` (No. ${docNo})` : ''}`;
+      const met = f.metPerson ? ` Met ${f.metPerson}${f.metPersonDesignation ? ` (${f.metPersonDesignation})` : ''}.` : f.verifiedWith ? ` Checked with ${f.verifiedWith}.` : '';
       return [
-        [
-          'Document check',
-          `The executive visited ${place} to verify ${v(leg.documentName, 'the document')}${f.documentNo ? ` (No. ${f.documentNo})` : ''}${f.verifiedWith ? ` and checked it with ${f.verifiedWith}` : ''}${f.documentStatus ? `. The document was found ${lower(f.documentStatus)}` : ''}.`,
-        ],
-        ...(f.details ? [['Details', f.details]] : []),
+        ['Document check', `${doc}: Verified the given document at ${place}.${met}${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`],
+        ...(f.feRemarks || f.details ? [['FE remarks', f.feRemarks || f.details]] : []),
       ];
-    case 'INTERNAL_DOCUMENT':
-      return [
-        [
-          'Internal check document',
-          `${v(leg.documentName, 'The document')}${f.documentNo ? ` (No. ${f.documentNo})` : ''} was checked internally by the office${f.documentStatus ? ` and found ${lower(f.documentStatus)}` : ''}.`,
-        ],
-        ...(f.details ? [['Details', f.details]] : []),
-      ];
+    }
+    case 'INTERNAL_DOCUMENT': {
+      const docNo = leg.documentNo || f.documentNo;
+      const doc = `${v(leg.documentName, 'Document')}${docNo ? ` (No. ${docNo})` : ''}`;
+      return [['Document check', f.details ? `${doc}: ${f.details}${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}` : `${doc}: Verified the given document.${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`]];
+    }
     default:
       return [];
   }

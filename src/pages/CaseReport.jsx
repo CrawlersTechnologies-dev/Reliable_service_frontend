@@ -4,7 +4,7 @@ import { Logo } from '../components/ui';
 import { fileUrl } from '../api';
 import Icon from '../components/Icon';
 import { caseInfoRows } from '../components/CaseInfoFields';
-import { AGENCY, DECLARATION_KN, DECLARATION_QUESTIONS, OUTCOMES, QA_PARAMS, TAT_TYPES, VISIT_RESULTS, typeOf } from '../config/verification';
+import { AGENCY, DECLARATION_KN, DECLARATION_QUESTIONS, OUTCOMES, QA_PARAMS, TAT_TYPES, VISIT_RESULTS, reportLabel, typeOf } from '../config/verification';
 import { caseStatus, caseSubmittedAt, caseTat } from '../utils/tat';
 import { fmtDateTime, fmtLongDate } from '../utils/format';
 import { buildRemarks } from '../utils/remarks';
@@ -70,7 +70,7 @@ export default function CaseReport() {
   const ORDER = ['RESIDENCE', 'RESI_CUM_OFFICE', 'BUSINESS', 'OFFICE', 'PROPERTY', 'DOCUMENT', 'INTERNAL_DOCUMENT', 'BANK_STATEMENT'];
   const legs = [...c.legs].sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
   const combined = legs.length > 1;
-  const typeNames = c.legs.map((l) => typeOf(l.type).label).join(' + ');
+  const typeNames = c.legs.map((l) => reportLabel(typeOf(l.type))).join(' + ');
   const tatLabel = tat.state === 'MET' || tat.state === 'IN_TAT' ? 'WITHIN TAT' : 'OUT OF TAT';
   const total = 2 + legs.length + legs.filter(hasEvidence).length + (combined ? 1 : 0) + (c.feedback ? 1 : 0);
   let page = 1;
@@ -139,19 +139,20 @@ export default function CaseReport() {
           const done = l.status === 'SUBMITTED';
           return (
             <section className="r-page" key={`${l.id}-a`}>
-              <h2 className="r-h2">{t.label} verification</h2>
+              <h2 className="r-h2">{reportLabel(t)}{t.isDocument ? '' : ' verification'}</h2>
               <Bar>Allocation</Bar>
               <KvTable
                 rows={
                   l.internal
                     ? [
-                        ...(t.isDocument ? [['Document type', l.documentName]] : []),
+                        ...(t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : []),
                         [t.placeLabel, l.address],
                         ['Handled by', l.completedBy?.name ? `${l.completedBy.name} (${l.completedBy.role === 'ADMIN' ? 'Admin' : 'Operations'})` : 'Admin / Operations'],
                         ['Completed', done ? fmtDateTime(l.submittedAt) : 'Pending'],
                         ['Attachments', `${l.attachments.length} file${l.attachments.length === 1 ? '' : 's'}`],
                       ]
                     : [
+                        ...(t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : []),
                         ['Address', [l.address, l.pincode].filter(Boolean).join(' – ')],
                         ['Executive', execById[l.executiveId]?.name],
                         ['Route', `${l.fromPlace || '—'} → ${l.toPlace || '—'}${l.km != null && l.km !== '' ? ` (${l.km} km)` : ''}`],
@@ -206,14 +207,14 @@ export default function CaseReport() {
         {combined && (
           <section className="r-page">
             <h2 className="r-h2">Overall combined remarks</h2>
-            <p className="r-sub">{legs.map((l) => typeOf(l.type).label).join(' + ')} — one report for all locations of this case</p>
+            <p className="r-sub">{legs.map((l) => reportLabel(typeOf(l.type))).join(' + ')} — one report for all locations of this case</p>
             {legs.map((l) => {
               const t = typeOf(l.type);
               const done = l.status === 'SUBMITTED';
               const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
               return (
                 <div key={l.id} className="r-combined">
-                  <Bar>{t.label}{!l.internal && execById[l.executiveId] ? ` — ${execById[l.executiveId].name}` : ''}</Bar>
+                  <Bar>{reportLabel(t)}</Bar>
                   <div className="r-remarks">
                     {!done ? (
                       <p className="r-note">Pending.</p>
@@ -248,7 +249,7 @@ export default function CaseReport() {
           return (
             <section className="r-page r-evidence" key={`${l.id}-b`}>
               <h2 className="r-h2">Field visit evidence</h2>
-              <p className="r-sub">Photo evidence · {t.label}{!l.internal && execById[l.executiveId] ? ` · ${execById[l.executiveId].name}` : ''}</p>
+              <p className="r-sub">Photo evidence · {reportLabel(t)}{!l.internal && execById[l.executiveId] ? ` · ${execById[l.executiveId].name}` : ''}</p>
               <Bar>{`Photo evidence — ${photos.length} photo${photos.length === 1 ? '' : 's'}`}</Bar>
               <div className={`r-photos r-photos-big ${photos.length <= 2 ? 'few' : photos.length <= 4 ? 'mid' : ''}`}>
                 {photos.map((p, i) => (
