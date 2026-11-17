@@ -1264,3 +1264,15 @@ p.r-text.kn { color: #4b5563; margin-top: -4px; line-height: 1.6; }
 .r-photos-big.few .r-photo-body { height: 100mm; }
 .r-photos-big .r-photo-foot { padding: 5px 10px; font-size: 10px; }
 .r-photos-big.mid .r-photo-body { height: 84mm; }
+
+/* ===== 17 Nov: compact report — allocations on page 1, fewer pages ===== */
+.r-first { gap: 6px; }
+.r-first .r-cover { gap: 6px; margin: 0; }
+.r-first .r-cover .logo-img { height: 72px; }
+.r-first .r-title { font-size: 21px; margin-top: 6px; }
+.r-first .r-sub { margin-bottom: 2px; }
+.r-first .r-bar { padding: 6px 12px; font-size: 12px; margin-top: 6px; }
+.r-alloc .r-kv-dense th, .r-alloc .r-kv-dense td { padding: 5px 9px; font-size: 11.5px; }
+.r-alloc { break-inside: avoid; page-break-inside: avoid; }
+.r-first .r-remarks p { margin: 0 0 5px; }
+.r-page.noc { gap: 4px; padding-top: 9mm; padding-bottom: 8mm; }

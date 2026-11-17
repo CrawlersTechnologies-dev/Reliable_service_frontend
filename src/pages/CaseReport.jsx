@@ -72,8 +72,67 @@ export default function CaseReport() {
   const combined = legs.length > 1;
   const typeNames = c.legs.map((l) => reportLabel(typeOf(l.type))).join(' + ');
   const tatLabel = tat.state === 'MET' || tat.state === 'IN_TAT' ? 'WITHIN TAT' : 'OUT OF TAT';
-  const total = 2 + legs.length + legs.filter(hasEvidence).length + (combined ? 1 : 0) + (c.feedback ? 1 : 0);
+  // allocations sit on page 1 under the case information; very large cases (4+ locations) get one allocation page
+  const allocOwnPage = legs.length > 3;
+  const total = 2 + (allocOwnPage ? 1 : 0) + legs.filter(hasEvidence).length + (combined ? 1 : 0) + (c.feedback ? 1 : 0);
   let page = 1;
+
+  const allocRows = (l) => {
+    const t = typeOf(l.type);
+    const done = l.status === 'SUBMITTED';
+    const nt = notTraced(l);
+    const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
+    const docRows = t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : [];
+    if (l.internal) {
+      // office document check: the details entered by operations go in the same table
+      const fields = t.fields.filter((f) => f.key !== 'documentNo' && (!f.showIf || f.showIf(l.findings)) && l.findings?.[f.key] !== undefined && l.findings?.[f.key] !== '');
+      return [
+        ...docRows,
+        [t.placeLabel, l.address],
+        ['Handled by', l.completedBy?.name ? `${l.completedBy.name} (${l.completedBy.role === 'ADMIN' ? 'Admin' : 'Operations'})` : 'Admin / Operations'],
+        ['Completed', done ? fmtDateTime(l.submittedAt) : 'Pending'],
+        ...(l.attachments.length ? [['Attachments', `${l.attachments.length} file${l.attachments.length === 1 ? '' : 's'}`]] : []),
+        ...(done ? fields.map((f) => [f.label, l.findings[f.key]]) : []),
+      ];
+    }
+    return [
+      ...docRows,
+      ['Address', [l.address, l.pincode].filter(Boolean).join(' – ')],
+      ['Executive', execById[l.executiveId]?.name],
+      ['Route', `${l.fromPlace || '—'} → ${l.toPlace || '—'}${l.km != null && l.km !== '' ? ` (${l.km} km)` : ''}`],
+      ['Submitted', done ? `${fmtDateTime(l.submittedAt)}${l.manual ? ' (entered by office)' : ''}` : 'Awaiting executive submission'],
+      ...(done && result ? [['Visit result', result.label]] : []),
+      ...(done && nt && l.nonVisitReason && !combined ? [['Reason (not conducted)', l.nonVisitReason]] : []),
+      ...(l.editedBy ? [['Details edited by', `${l.editedBy.name} · ${fmtDateTime(l.editedAt)}`]] : []),
+    ];
+  };
+  const allocation = legs.map((l) => {
+    const t = typeOf(l.type);
+    return (
+      <div key={`${l.id}-a`} className="r-alloc">
+        <Bar>{`Allocation — ${reportLabel(t)}${t.isDocument ? '' : ' verification'}`}</Bar>
+        <KvTable dense rows={allocRows(l)} />
+      </div>
+    );
+  });
+  // single-location case: its remarks follow the allocation on page 1 (combined cases have their own remarks page)
+  const single = !combined && legs[0];
+  const singleRemarks = single && !notTraced(single) && (
+    <>
+      <Bar>{single.internal ? 'Remarks' : 'Visit remarks — structured findings'}</Bar>
+      <div className="r-remarks">
+        {single.status === 'SUBMITTED' ? (
+          buildRemarks(single.type, single.findings, single).map(([k, v]) => (
+            <p key={k}>
+              <strong>{k}:</strong> {v}
+            </p>
+          ))
+        ) : (
+          <p className="r-note">{single.internal ? 'Remarks will appear once the details are added.' : 'Remarks will be generated when the visit is submitted.'}</p>
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div className="report-shell">
@@ -92,7 +151,7 @@ export default function CaseReport() {
 
       <div className="report">
         {/* Page 1 — case information */}
-        <section className="r-page">
+        <section className="r-page r-first">
           <div className="r-cover">
             <Logo />
             <p className="r-tagline">{AGENCY.name.toUpperCase()} | {AGENCY.tagline}</p>
@@ -127,82 +186,19 @@ export default function CaseReport() {
             ]}
           />
 
+          {!allocOwnPage && allocation}
+          {singleRemarks}
+
           <Footer n={page++} total={total} />
         </section>
 
-        {legs.map((l) => {
-          const t = typeOf(l.type);
-          const nt = notTraced(l);
-          const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
-          // manual entries may be partial: print only the answers that were filled in
-          const fields = t.fields.filter((f) => (!f.showIf || f.showIf(l.findings)) && (!l.manual || (l.findings[f.key] !== undefined && l.findings[f.key] !== '')));
-          const done = l.status === 'SUBMITTED';
-          return (
-            <section className="r-page" key={`${l.id}-a`}>
-              <h2 className="r-h2">{reportLabel(t)}{t.isDocument ? '' : ' verification'}</h2>
-              <Bar>Allocation</Bar>
-              <KvTable
-                rows={
-                  l.internal
-                    ? [
-                        ...(t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : []),
-                        [t.placeLabel, l.address],
-                        ['Handled by', l.completedBy?.name ? `${l.completedBy.name} (${l.completedBy.role === 'ADMIN' ? 'Admin' : 'Operations'})` : 'Admin / Operations'],
-                        ['Completed', done ? fmtDateTime(l.submittedAt) : 'Pending'],
-                        ['Attachments', `${l.attachments.length} file${l.attachments.length === 1 ? '' : 's'}`],
-                      ]
-                    : [
-                        ...(t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : []),
-                        ['Address', [l.address, l.pincode].filter(Boolean).join(' – ')],
-                        ['Executive', execById[l.executiveId]?.name],
-                        ['Route', `${l.fromPlace || '—'} → ${l.toPlace || '—'}${l.km != null && l.km !== '' ? ` (${l.km} km)` : ''}`],
-                        ['Submitted', done ? `${fmtDateTime(l.submittedAt)}${l.manual ? ' (entered by office)' : ''}` : 'Pending'],
-                        ...(done && result ? [['Visit result', result.label]] : []),
-                        ...(l.editedBy ? [['Details edited by', `${l.editedBy.name} · ${fmtDateTime(l.editedAt)}`]] : []),
-                      ]
-                }
-              />
-              {/* field findings table is not printed for field visits (client format) — remarks below carry the findings */}
-              {l.internal ? (
-                <>
-                  <Bar>Verification details</Bar>
-                  {done ? (
-                    fields.length ? <KvTable rows={fields.map((f) => [f.label, l.findings[f.key]])} /> : <p className="r-note">See remarks below.</p>
-                  ) : (
-                    <p className="r-note">Details not added yet.</p>
-                  )}
-                </>
-              ) : done && nt ? (
-                <>
-                  <Bar>{`Verification not conducted — ${result?.label}`}</Bar>
-                  <div className="r-box r-not-traced">
-                    <strong>Reason given by the field executive:</strong>
-                    <p>{l.nonVisitReason}</p>
-                  </div>
-                </>
-              ) : !done ? (
-                <p className="r-note">Awaiting executive submission.</p>
-              ) : null}
-              {!combined && !nt && (
-              <>
-              <Bar>{l.internal ? 'Remarks' : 'Visit remarks — structured findings'}</Bar>
-              <div className="r-remarks">
-                {done ? (
-                  buildRemarks(l.type, l.findings, l).map(([k, v]) => (
-                    <p key={k}>
-                      <strong>{k}:</strong> {v}
-                    </p>
-                  ))
-                ) : (
-                  <p className="r-note">{l.internal ? 'Remarks will appear once the details are added.' : 'Remarks will be generated when the visit is submitted.'}</p>
-                )}
-              </div>
-              </>
-              )}
-              <Footer n={page++} total={total} />
-            </section>
-          );
-        })}
+        {allocOwnPage && (
+          <section className="r-page">
+            <h2 className="r-h2">Allocation details</h2>
+            {allocation}
+            <Footer n={page++} total={total} />
+          </section>
+        )}
 
         {combined && (
           <section className="r-page">
