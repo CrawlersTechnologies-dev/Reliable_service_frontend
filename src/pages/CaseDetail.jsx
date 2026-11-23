@@ -7,7 +7,7 @@ import { Avatar, Empty, Field, Modal, PageHeader, Pill, Stars, TatBadge, TypeChi
 import Icon from '../components/Icon';
 import TatReason from '../components/TatReason';
 import CaseInfoFields, { caseInfoRows, infoFromCase, infoPayload, validateInfo } from '../components/CaseInfoFields';
-import { DECLARATION_QUESTIONS, OUTCOMES, QA_PARAMS, TAT_TYPES, VISIT_RESULTS, typeOf } from '../config/verification';
+import { DOC_HOLDER_RELATIONS, DECLARATION_QUESTIONS, OUTCOMES, QA_PARAMS, TAT_TYPES, VISIT_RESULTS, typeOf } from '../config/verification';
 import { CASE_STATUS, LEG_STATUS, caseStatus, caseSubmittedAt, caseTat, deadlineOf, legTat } from '../utils/tat';
 import { copyText, feedbackUrl, fmtDate, fmtDateTime } from '../utils/format';
 import { directionsLink, legMapLink } from '../utils/maps';
@@ -161,7 +161,15 @@ export default function CaseDetail() {
               now={now}
               exec={execById[l.executiveId]}
               executives={executives}
-              onReassign={(eid) => act(() => api.cases.reassign(c.id, l.id, eid), 'Executive reassigned')}
+              onReassign={(eid) => {
+                if (eid === 'INTERNAL') {
+                  const who = execById[l.executiveId]?.name || 'the executive';
+                  if (!window.confirm(`Close this ${typeOf(l.type).label.toLowerCase()} internally?\n\nIt is removed from ${who}'s app right away and they can no longer submit it. Then use "Add details" to enter the findings.`)) return;
+                  return act(() => api.cases.reassign(c.id, l.id, 'INTERNAL'), 'Moved to Internal — removed from the executive app. Add the details to close it.');
+                }
+                return act(() => api.cases.reassign(c.id, l.id, eid), 'Executive reassigned');
+              }}
+              onDocument={(data) => act(() => api.cases.setDocument(c.id, l.id, data), 'Document details saved')}
               onSimulate={() => act(() => api.cases.simulateVisit(c.id, l.id), l.status === 'ASSIGNED' ? 'Visit started (demo)' : 'Visit submitted (demo)')}
               onManual={() => setManualLeg(l)}
               onEdit={() => setEditLeg(l)}
@@ -230,7 +238,10 @@ export default function CaseDetail() {
   );
 }
 
-function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate, onManual, onEdit, onRework }) {
+function LegPanel({ c, leg, index, now, exec, executives, onReassign, onDocument, onSimulate, onManual, onEdit, onRework }) {
+  const [docEdit, setDocEdit] = useState(null);
+  // a field visit operations took back from the executive (closed internally)
+  const inOffice = !leg.internal && !leg.executiveId;
   const t = typeOf(leg.type);
   const map = legMapLink(leg);
   const dir = directionsLink(leg.fromPlace, leg.toPlace);
@@ -265,7 +276,7 @@ function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate
           )}
           {(!submitted || leg.manual) && !c.outcome && (
             <button
-              className={`btn btn-xs ${leg.internal && !submitted ? 'btn-primary' : 'btn-ghost'}`}
+              className={`btn btn-xs ${(leg.internal || inOffice) && !submitted ? 'btn-primary' : 'btn-ghost'}`}
               onClick={onManual}
               title="Enter the details yourself (handled in the office)"
             >
@@ -348,6 +359,40 @@ function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate
             <span className="info-label">
               <Icon name="file" size={14} /> {t.isDocument ? leg.documentName || 'Document' : 'Files'} · {leg.attachments.length} attachment{leg.attachments.length === 1 ? '' : 's'}
             </span>
+            {t.isDocument && !docEdit && (
+              <p className="small">
+                Document No. <strong>{leg.documentNo || leg.findings?.documentNo || '—'}</strong> · Holder{' '}
+                <strong>{[leg.holderName, leg.holderRelation && `(${leg.holderRelation})`].filter(Boolean).join(' ') || '—'}</strong>
+                {!c.outcome && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => setDocEdit({ documentNo: leg.documentNo || leg.findings?.documentNo || '', holderName: leg.holderName || '', holderRelation: leg.holderRelation || '' })}
+                  >
+                    <Icon name="edit" size={12} /> Edit
+                  </button>
+                )}
+              </p>
+            )}
+            {t.isDocument && docEdit && (
+              <div className="doc-edit">
+                <input value={docEdit.documentNo} onChange={(e) => setDocEdit({ ...docEdit, documentNo: e.target.value })} placeholder="Document No." aria-label="Document No." />
+                <input value={docEdit.holderName} onChange={(e) => setDocEdit({ ...docEdit, holderName: e.target.value })} placeholder="Document holder name" aria-label="Document holder name" />
+                <select value={docEdit.holderRelation} onChange={(e) => setDocEdit({ ...docEdit, holderRelation: e.target.value })} aria-label="Relationship">
+                  <option value="">Relationship</option>
+                  {DOC_HOLDER_RELATIONS.map((r) => (
+                    <option key={r}>{r}</option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-primary btn-xs" onClick={async () => { await onDocument(docEdit); setDocEdit(null); }}>
+                  Save
+                </button>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setDocEdit(null)}>
+                  Cancel
+                </button>
+              </div>
+            )}
             <ul className="file-list">
               {leg.attachments.map((a, i) => (
                 <li key={i}>
@@ -364,7 +409,30 @@ function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate
         )}
       </div>
 
-      {leg.internal ? (
+      {inOffice ? (
+        <div className="leg-exec">
+          <span className="internal-badge">
+            <Icon name="manual" size={18} />
+          </span>
+          <div className="leg-exec-who">
+            <strong>Closed internally (Internal)</strong>
+            <span className="muted small">
+              {leg.closedInternally ? `Taken back from the executive by ${leg.closedInternally.by?.name || 'Admin / OL'} · ${fmtDateTime(leg.closedInternally.at)}. ` : ''}
+              {submitted ? `Details added by ${leg.completedBy?.name || 'Admin / OL'}` : 'Not in any executive app — add the details to close it.'}
+            </span>
+          </div>
+          {!submitted && !c.outcome && (
+            <select className="sm-select" value="INTERNAL" onChange={(e) => onReassign(e.target.value)} aria-label="Assign executive">
+              <option value="INTERNAL">Internal (office)</option>
+              {executives
+                .filter((e) => e.status === 'Active')
+                .map((e) => (
+                  <option key={e.id} value={e.id}>{`Assign to ${e.name} (${e.location})`}</option>
+                ))}
+            </select>
+          )}
+        </div>
+      ) : leg.internal ? (
         <div className="leg-exec">
           <span className="internal-badge">
             <Icon name="manual" size={18} />
@@ -394,6 +462,7 @@ function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate
                   {e.id === leg.executiveId ? `Assigned: ${e.name}` : `Reassign to ${e.name} (${e.location})`}
                 </option>
               ))}
+            {!c.outcome && <option value="INTERNAL">Internal — close in the office</option>}
           </select>
         )}
       </div>
@@ -449,9 +518,14 @@ function LegPanel({ c, leg, index, now, exec, executives, onReassign, onSimulate
           )}
           {!notTraced && (
           <div className="remarks">
-            {buildRemarks(leg.type, leg.findings, leg).map(([title, text]) => (
-              <p key={title}>
-                <strong>{title}:</strong> {text}
+            {buildRemarks(leg.type, leg.findings, leg).map(([title, text], i) => (
+              <p key={i}>
+                {title && (
+                  <>
+                    <strong>{title}:</strong>{' '}
+                  </>
+                )}
+                {text}
               </p>
             ))}
           </div>
@@ -526,7 +600,7 @@ function ManualDetails({ c, leg, onClose, onSave }) {
       <p className="muted small manual-note">
         {t.internal
           ? 'Enter what was verified. Fill what you have — blank fields are left out of the report.'
-          : `Use this when the case is handled in the office instead of a field visit. ${leg.status !== 'ASSIGNED' ? 'The executive has already started this visit. ' : ''}Blank fields are left out of the report.`}
+          : `Use this when the case is handled in the office instead of a field visit. ${leg.executiveId ? 'Saving moves it to Internal — it is removed from the executive app and they can no longer submit it. ' : ''}${leg.status !== 'ASSIGNED' && leg.executiveId ? 'The executive has already started this visit. ' : ''}Blank fields are left out of the report.`}
         {' '}After saving, set the final status to close the case.
       </p>
       <div className="form-grid">
@@ -685,6 +759,7 @@ function Timeline({ c, execById }) {
           text: `${label[0].toUpperCase()}${label.slice(1)} moved from ${t.from?.name || 'unassigned'} to ${t.to?.name} by ${t.by?.name}`,
           tone: 'transfer',
         })),
+        l.acceptedAt && { at: l.acceptedAt, text: `${execById[l.executiveId]?.name || 'Executive'} accepted the ${label} visit${l.acceptedOnRoute ? ' (new case on route alert)' : ''}` },
         !l.manual && l.startedAt && { at: l.startedAt, text: `${execById[l.executiveId]?.name || 'Executive'} started ${label} visit` },
         l.submittedAt &&
           (l.manual

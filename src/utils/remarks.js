@@ -10,6 +10,9 @@ const political = (f) =>
   f.politicalLink === 'Political link found'
     ? 'Applicant was reported as having a political link — refer the case for credit review.'
     : 'Applicant was reported as not having a political background.';
+// "Document of Naman Siddaraj (Applicant). "
+export const holderText = (leg = {}) =>
+  leg.holderName ? `Document of ${leg.holderName}${leg.holderRelation ? ` (${leg.holderRelation})` : ''}. ` : leg.holderRelation ? `${leg.holderRelation}'s document. ` : '';
 const tpc = (f) => (f.neighbour ? `TPC ${f.neighbour} confirmed with ${lower(v(f.neighbourFeedback, 'no'))} feedback.` : null);
 
 export function buildRemarks(type, f = {}, leg = {}) {
@@ -66,20 +69,23 @@ function typeRemarks(type, f = {}, leg = {}) {
         ['Valuation', `Government value ₹${v(f.govtValue)}; private/market value ₹${v(f.privateValue)}.`],
         ['Neighbour check', `${v(f.neighbourCheck, 'Not recorded')}. Nearest landmark is ${v(f.landmark)}.`],
       ];
-    // Field and internal document checks print the same way, under "Document check"
+    // Field document check: one line with what was verified — the executive's own "FE remarks"
+    // are not printed (they are often very short or in Kannada).
     case 'DOCUMENT': {
       const docNo = leg.documentNo || f.documentNo;
-      const doc = `${v(leg.documentName, 'Document')}${docNo ? ` (No. ${docNo})` : ''}`;
       const met = f.metPerson ? ` Met ${f.metPerson}${f.metPersonDesignation ? ` (${f.metPersonDesignation})` : ''}.` : f.verifiedWith ? ` Checked with ${f.verifiedWith}.` : '';
       return [
-        ['Document check', `${doc}: Verified the given document at ${place}.${met}${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`],
-        ...(f.feRemarks || f.details ? [['FE remarks', f.feRemarks || f.details]] : []),
+        [
+          v(leg.documentName, 'Document'),
+          `${holderText(leg)}${docNo ? `Document No. ${docNo}. ` : ''}Verified the given document at ${place}.${met}${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`,
+        ],
       ];
     }
+    // Internal check document: the remarks typed by operations are printed directly (no heading)
     case 'INTERNAL_DOCUMENT': {
+      if (f.details) return [['', f.details]];
       const docNo = leg.documentNo || f.documentNo;
-      const doc = `${v(leg.documentName, 'Document')}${docNo ? ` (No. ${docNo})` : ''}`;
-      return [['Document check', f.details ? `${doc}: ${f.details}${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}` : `${doc}: Verified the given document.${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`]];
+      return [[v(leg.documentName, 'Document'), `${holderText(leg)}${docNo ? `Document No. ${docNo}. ` : ''}Verified the given document.${f.documentStatus ? ` Status: ${f.documentStatus}.` : ''}`]];
     }
     default:
       return [];

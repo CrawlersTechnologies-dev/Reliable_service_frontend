@@ -127,6 +127,7 @@ export const cases = {
     return result;
   },
   reassign: async (caseId, legId, executiveId) => (await request('PATCH', `/api/cases/${caseId}/legs/${legId}/assign`, { body: { executiveId } })).case,
+  setDocument: async (caseId, legId, body) => (await request('PATCH', `/api/cases/${caseId}/legs/${legId}/document`, { body })).case,
   setOutcome: async (caseId, data) => (await request('POST', `/api/cases/${caseId}/outcome`, { body: data })).case,
   // why the case crossed its TAT ('' clears it)
   rework: async (caseId, legId, reason) => (await request('POST', `/api/cases/${caseId}/legs/${legId}/rework`, { body: { reason } })).case,

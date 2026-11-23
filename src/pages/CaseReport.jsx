@@ -42,6 +42,10 @@ const FragmentPair = ({ k, v }) => (
   </>
 );
 
+// how much allocation fits under the case information on page 1
+const ALLOC_UNITS_PAGE1 = 21;
+const ALLOC_UNITS_FULL_COVER = 15; // above this the page-1 heading is printed in one compact line
+
 const Bar = ({ children }) => <div className="r-bar">{children}</div>;
 const Footer = ({ n, total }) => (
   <div className="r-foot">
@@ -62,7 +66,7 @@ export default function CaseReport() {
   const status = caseStatus(c);
   const outcome = OUTCOMES.find((o) => o.key === c.outcome);
   // current executive only (earlier executives of a transferred case are not printed)
-  const execNames = [...new Set(c.legs.map((l) => (l.internal ? 'Handled internally' : execById[l.executiveId]?.name)).filter(Boolean))].join(', ');
+  const execNames = [...new Set(c.legs.map((l) => (l.internal || !l.executiveId ? 'Handled internally' : execById[l.executiveId]?.name)).filter(Boolean))].join(', ');
   // evidence page only for legs that have photo slots and were not entered manually without photos
   const notTraced = (l) => l.status === 'SUBMITTED' && l.visitResult && l.visitResult !== 'TRACED';
   const hasEvidence = (l) => (notTraced(l) ? l.photoDetails?.length > 0 : typeOf(l.type).photos.length > 0 && !(l.manual && !l.photos.some(Boolean)));
@@ -70,11 +74,20 @@ export default function CaseReport() {
   const ORDER = ['RESIDENCE', 'RESI_CUM_OFFICE', 'BUSINESS', 'OFFICE', 'PROPERTY', 'DOCUMENT', 'INTERNAL_DOCUMENT', 'BANK_STATEMENT'];
   const legs = [...c.legs].sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
   const combined = legs.length > 1;
-  const typeNames = c.legs.map((l) => reportLabel(typeOf(l.type))).join(' + ');
+  // documents are named by what was checked: "Residence + Business + Salary Certificate + Bank Statement"
+  const legName = (l) => (typeOf(l.type).isDocument ? l.documentName || reportLabel(typeOf(l.type)) : reportLabel(typeOf(l.type)));
+  const typeNames = legs.map(legName).join(' + ');
+  // field and internal document checks print together under one "Document check" heading
+  const groups = [];
+  for (const l of legs) {
+    const t = typeOf(l.type);
+    const key = t.isDocument ? 'DOC' : l.id;
+    let g = groups.find((x) => x.key === key);
+    if (!g) groups.push((g = { key, title: t.isDocument ? 'Document check' : `${reportLabel(t)} verification`, legs: [] }));
+    g.legs.push(l);
+  }
+  const evidenceTitle = (l) => (typeOf(l.type).isDocument ? `Document check — ${legName(l)}` : `${reportLabel(typeOf(l.type))} verification`);
   const tatLabel = tat.state === 'MET' || tat.state === 'IN_TAT' ? 'WITHIN TAT' : 'OUT OF TAT';
-  // allocations sit on page 1 under the case information; very large cases (4+ locations) get one allocation page
-  const allocOwnPage = legs.length > 3;
-  const total = 2 + (allocOwnPage ? 1 : 0) + legs.filter(hasEvidence).length + (combined ? 1 : 0) + (c.feedback ? 1 : 0);
   let page = 1;
 
   const allocRows = (l) => {
@@ -82,10 +95,16 @@ export default function CaseReport() {
     const done = l.status === 'SUBMITTED';
     const nt = notTraced(l);
     const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
-    const docRows = t.isDocument ? [['Document type', l.documentName], ['Document No.', l.documentNo || l.findings?.documentNo]] : [];
+    const docRows = t.isDocument
+      ? [
+          ['Document type', l.documentName],
+          ['Document No.', l.documentNo || l.findings?.documentNo],
+          ...(l.holderName || l.holderRelation ? [['Document holder', [l.holderName, l.holderRelation && `(${l.holderRelation})`].filter(Boolean).join(' ')]] : []),
+        ]
+      : [];
     if (l.internal) {
-      // office document check: the details entered by operations go in the same table
-      const fields = t.fields.filter((f) => f.key !== 'documentNo' && (!f.showIf || f.showIf(l.findings)) && l.findings?.[f.key] !== undefined && l.findings?.[f.key] !== '');
+      // office document check: status here, the remarks go to the remarks section (not the allocation)
+      const fields = t.fields.filter((f) => !['documentNo', 'details'].includes(f.key) && (!f.showIf || f.showIf(l.findings)) && l.findings?.[f.key] !== undefined && l.findings?.[f.key] !== '');
       return [
         ...docRows,
         [t.placeLabel, l.address],
@@ -98,7 +117,7 @@ export default function CaseReport() {
     return [
       ...docRows,
       ['Address', [l.address, l.pincode].filter(Boolean).join(' – ')],
-      ['Executive', execById[l.executiveId]?.name],
+      ['Executive', l.executiveId ? execById[l.executiveId]?.name : 'Handled internally (office)'],
       ['Route', `${l.fromPlace || '—'} → ${l.toPlace || '—'}${l.km != null && l.km !== '' ? ` (${l.km} km)` : ''}`],
       ['Submitted', done ? `${fmtDateTime(l.submittedAt)}${l.manual ? ' (entered by office)' : ''}` : 'Awaiting executive submission'],
       ...(done && result ? [['Visit result', result.label]] : []),
@@ -106,15 +125,34 @@ export default function CaseReport() {
       ...(l.editedBy ? [['Details edited by', `${l.editedBy.name} · ${fmtDateTime(l.editedAt)}`]] : []),
     ];
   };
-  const allocation = legs.map((l) => {
-    const t = typeOf(l.type);
-    return (
-      <div key={`${l.id}-a`} className="r-alloc">
-        <Bar>{`Allocation — ${reportLabel(t)}${t.isDocument ? '' : ' verification'}`}</Bar>
-        <KvTable dense rows={allocRows(l)} />
-      </div>
-    );
-  });
+  // allocations sit on page 1 under the case information; very large cases (4+ locations) get one allocation page
+  // (measured in table rows: one row holds two fields; a heading bar ≈ 1.3 rows)
+  const allocUnits = groups.reduce((n, g) => n + 1.3 + g.legs.reduce((m, l) => m + Math.ceil(allocRows(l).length / 2) + (g.legs.length > 1 ? 0.6 : 0), 0), 0);
+  const allocOwnPage = allocUnits > ALLOC_UNITS_PAGE1;
+  const total = 2 + (allocOwnPage ? 1 : 0) + legs.filter(hasEvidence).length + (combined ? 1 : 0) + (c.feedback ? 1 : 0);
+  const allocation = groups.map((g) => (
+    <div key={`${g.key}-a`} className="r-alloc">
+      <Bar>{`Allocation — ${g.title}`}</Bar>
+      {g.legs.map((l) => (
+        <div key={l.id}>
+          {g.legs.length > 1 && <p className="r-alloc-sub">{legName(l)}</p>}
+          <KvTable dense rows={allocRows(l)} />
+        </div>
+      ))}
+    </div>
+  ));
+  // remark paragraphs; the internal document remarks have no heading and print as written
+  const paras = (l) =>
+    buildRemarks(l.type, l.findings, l).map(([k, v], i) => (
+      <p key={i} className={k ? '' : 'r-asis'}>
+        {k && (
+          <>
+            <strong>{k}:</strong>{' '}
+          </>
+        )}
+        {v}
+      </p>
+    ));
   // single-location case: its remarks follow the allocation on page 1 (combined cases have their own remarks page)
   const single = !combined && legs[0];
   const singleRemarks = single && !notTraced(single) && (
@@ -122,11 +160,7 @@ export default function CaseReport() {
       <Bar>{single.internal ? 'Remarks' : 'Visit remarks — structured findings'}</Bar>
       <div className="r-remarks">
         {single.status === 'SUBMITTED' ? (
-          buildRemarks(single.type, single.findings, single).map(([k, v]) => (
-            <p key={k}>
-              <strong>{k}:</strong> {v}
-            </p>
-          ))
+          paras(single)
         ) : (
           <p className="r-note">{single.internal ? 'Remarks will appear once the details are added.' : 'Remarks will be generated when the visit is submitted.'}</p>
         )}
@@ -151,7 +185,7 @@ export default function CaseReport() {
 
       <div className="report">
         {/* Page 1 — case information */}
-        <section className="r-page r-first">
+        <section className={`r-page r-first ${allocUnits > ALLOC_UNITS_FULL_COVER && !allocOwnPage ? 'r-first-compact' : ''}`}>
           <div className="r-cover">
             <Logo />
             <p className="r-tagline">{AGENCY.name.toUpperCase()} | {AGENCY.tagline}</p>
@@ -203,32 +237,27 @@ export default function CaseReport() {
         {combined && (
           <section className="r-page">
             <h2 className="r-h2">Overall combined remarks</h2>
-            <p className="r-sub">{legs.map((l) => reportLabel(typeOf(l.type))).join(' + ')} — one report for all locations of this case</p>
-            {legs.map((l) => {
-              const t = typeOf(l.type);
-              const done = l.status === 'SUBMITTED';
-              const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
-              return (
-                <div key={l.id} className="r-combined">
-                  <Bar>{reportLabel(t)}</Bar>
-                  <div className="r-remarks">
-                    {!done ? (
-                      <p className="r-note">Pending.</p>
+            <p className="r-sub">{typeNames} — one report for all locations of this case</p>
+            {groups.map((g) => (
+              <div key={g.key} className="r-combined">
+                <Bar>{g.title}</Bar>
+                <div className="r-remarks">
+                  {g.legs.map((l) => {
+                    const result = VISIT_RESULTS.find((r) => r.key === l.visitResult);
+                    const doc = g.legs.length > 1 || typeOf(l.type).isDocument ? `${legName(l)} — ` : '';
+                    return l.status !== 'SUBMITTED' ? (
+                      <p key={l.id} className="r-note">{doc}Pending.</p>
                     ) : notTraced(l) ? (
-                      <p>
-                        <strong>{result?.label}:</strong> {l.nonVisitReason}
+                      <p key={l.id}>
+                        <strong>{doc}{result?.label}:</strong> {l.nonVisitReason}
                       </p>
                     ) : (
-                      buildRemarks(l.type, l.findings, l).map(([k, v]) => (
-                        <p key={k}>
-                          <strong>{k}:</strong> {v}
-                        </p>
-                      ))
-                    )}
-                  </div>
+                      <div key={l.id}>{paras(l)}</div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
             <Footer n={page++} total={total} />
           </section>
         )}
@@ -244,9 +273,13 @@ export default function CaseReport() {
                 .filter((p) => p.has || !p.optional);
           return (
             <section className="r-page r-evidence" key={`${l.id}-b`}>
-              <h2 className="r-h2">Field visit evidence</h2>
-              <p className="r-sub">Photo evidence · {reportLabel(t)}{!l.internal && execById[l.executiveId] ? ` · ${execById[l.executiveId].name}` : ''}</p>
-              <Bar>{`Photo evidence — ${photos.length} photo${photos.length === 1 ? '' : 's'}`}</Bar>
+              <h2 className="r-h2">Field visit evidence — {evidenceTitle(l)}</h2>
+              <p className="r-sub">
+                Photos taken at the {t.placeLabel.toLowerCase()}
+                {[l.address, l.pincode].filter(Boolean).length ? `: ${[l.address, l.pincode].filter(Boolean).join(' – ')}` : ''}
+                {!l.internal && execById[l.executiveId] ? ` · ${execById[l.executiveId].name}` : ''}
+              </p>
+              <Bar>{`${evidenceTitle(l)} — ${photos.length} photo${photos.length === 1 ? '' : 's'}`}</Bar>
               <div className={`r-photos r-photos-big ${photos.length <= 2 ? 'few' : photos.length <= 4 ? 'mid' : ''}`}>
                 {photos.map((p, i) => (
                   <div className="r-photo" key={i}>

@@ -48,6 +48,8 @@ export const PRODUCTS = [
 export const OTHER = 'Other';
 
 export const DOCUMENT_NAMES = ['Khata', 'RTC', 'Salary Certificate', 'NDC', 'NOC', 'Other'];
+// whose document it is (entered by operations with the document check)
+export const DOC_HOLDER_RELATIONS = ['Applicant', 'Co-applicant', 'Guarantor'];
 
 // What the executive found when reaching the address (asked before the questionnaire)
 export const VISIT_RESULTS = [

@@ -42,12 +42,13 @@ function kms(c) {
 function combinedRemarks(c) {
   return c.legs
     .map((l) => {
-      const name = reportLabel(typeOf(l.type)).toUpperCase();
+      const t = typeOf(l.type);
+      const name = `${reportLabel(t).toUpperCase()}${t.isDocument && l.documentName ? ` (${l.documentName})` : ''}`;
       if (l.status !== 'SUBMITTED') return `${name}: Pending`;
       if (['UNTRACEABLE', 'REFUSED'].includes(l.visitResult)) {
         return `${name}: ${VISIT_RESULTS.find((r) => r.key === l.visitResult)?.label || l.visitResult} — ${l.nonVisitReason || ''}`;
       }
-      const lines = buildRemarks(l.type, l.findings || {}, l).map(([k, v]) => `${k}: ${v}`);
+      const lines = buildRemarks(l.type, l.findings || {}, l).map(([k, v]) => (k ? `${k}: ${v}` : v));
       return `${name}\n${lines.join('\n')}`;
     })
     .join('\n\n');

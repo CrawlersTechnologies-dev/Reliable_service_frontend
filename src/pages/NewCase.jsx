@@ -4,7 +4,7 @@ import * as api from '../api';
 import { useData, useToast } from '../context/AppContext';
 import { Field, Modal, PageHeader, Segmented, TypeChip } from '../components/ui';
 import Icon from '../components/Icon';
-import { DOCUMENT_NAMES, PINCODE_RE, TAT_TYPES, TYPE_LIST, typeOf } from '../config/verification';
+import { DOC_HOLDER_RELATIONS, DOCUMENT_NAMES, PINCODE_RE, TAT_TYPES, TYPE_LIST, typeOf } from '../config/verification';
 import { coordsFromLink, directionsLink } from '../utils/maps';
 import { copyText, feedbackUrl, fmtDateTime, inr } from '../utils/format';
 import { caseStatus } from '../utils/tat';
@@ -30,6 +30,8 @@ const newLeg = (type) => ({
   docNo: '', // internal document check
   docDetails: '',
   docStatus: '',
+  holderName: '', // whose document it is
+  holderRelation: '',
   attachments: [],
   contactPerson: '',
 });
@@ -201,6 +203,7 @@ export default function NewCase() {
               execs={activeExecs}
               openLoad={openLoad}
               defaultContact={form.contact}
+              names={[form.customerName, ...(form.otherNames || []), form.coApplicantName].map((n) => (n || '').trim()).filter(Boolean)}
               onChange={(patch) => setLeg(l.key, patch)}
               onRemove={() => removeLeg(l.key)}
             />
@@ -318,7 +321,7 @@ function CreatedBody({ c }) {
   );
 }
 
-function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, onChange, onRemove }) {
+function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, names, onChange, onRemove }) {
   const t = typeOf(leg.type);
   const err = (k) => errors[`${leg.key}.${k}`];
   const coords = coordsFromLink(leg.mapLink);
@@ -344,6 +347,26 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
     onChange({ attachments: [...leg.attachments, ...list.map((f) => ({ file: f, name: f.name, type: f.type, size: f.size, preview: f.type.startsWith('image/') ? URL.createObjectURL(f) : null }))] });
   };
 
+  const holder = (
+    <>
+      <Field label="Document holder name" hint="Whose document it is — prints on the report">
+        <input value={leg.holderName} onChange={(e) => onChange({ holderName: e.target.value })} list={`holders-${leg.key}`} placeholder="e.g. Naman Siddaraj" />
+        <datalist id={`holders-${leg.key}`}>
+          {[...new Set(names || [])].map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+      </Field>
+      <Field label="Relationship">
+        <select value={leg.holderRelation} onChange={(e) => onChange({ holderRelation: e.target.value })}>
+          <option value="">Choose</option>
+          {DOC_HOLDER_RELATIONS.map((r) => (
+            <option key={r}>{r}</option>
+          ))}
+        </select>
+      </Field>
+    </>
+  );
   const attachments = (label, min) => (
     <div className="span-2">
       <Field label={label} required={min > 0} error={err('attachments')}>
@@ -431,6 +454,8 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
               ))}
             </select>
           </Field>
+          <span />
+          {holder}
           <Field label="Remarks" className="span-2" hint="Printed on the bank report exactly as written, under Document check. Leave empty to fill in later.">
             <textarea rows={3} value={leg.docDetails} onChange={(e) => onChange({ docDetails: e.target.value })} placeholder="e.g. Checked with the Taluk office register — owner name, survey no. and issue date match." />
           </Field>
@@ -480,6 +505,7 @@ function LegCard({ leg, index, count, errors, execs, openLoad, defaultContact, o
                 <input value={leg.docNo} onChange={(e) => onChange({ docNo: e.target.value })} placeholder="e.g. RTC/HBL/2025/4410" />
               </Field>
               {leg.documentName !== 'Other' && <span />}
+              {holder}
               {attachments('Document copies for the executive (photos / PDF, optional)', 0)}
             </>
           )}
